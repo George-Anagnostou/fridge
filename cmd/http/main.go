@@ -2,6 +2,8 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -60,6 +62,8 @@ func main() {
 
 	http.HandleFunc("/", listAndAddHandler)
 	http.HandleFunc("POST /remove", removeHandler)
+	http.HandleFunc("GET /items", getItemsHandler)
+	http.HandleFunc("POST /items", postItemsHandler)
 
 	log.Print("Starting server on :8080...")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
@@ -128,15 +132,12 @@ func listAndAddHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func removeHandler(w http.ResponseWriter, r *http.Request) {
-	log.Print(r.Method)
 	idStr := r.FormValue("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "Unable to get item to remove", http.StatusInternalServerError)
 		log.Println("Unable to remove item", err)
 	}
-
-	log.Printf("trying to remove id = %03d\n", id)
 
 	// Remove the item from the fridge
 	myFridge.Lock()
@@ -147,4 +148,51 @@ func removeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Redirect back to the list
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func getItemsHandler(w http.ResponseWriter, r *http.Request) {
+	myFridge.Lock()
+	defer myFridge.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+
+	items, err := myFridge.ListItems(db)
+	if err != nil {
+		http.Error(w, "Unable to get items", http.StatusInternalServerError)
+		log.Println("Error getting items", err)
+	}
+
+	if err := json.NewEncoder(w).Encode(items); err != nil {
+		http.Error(w, "Failed to encode items to JSON", http.StatusInternalServerError)
+	}
+}
+
+func postItemsHandler(w http.ResponseWriter, r *http.Request) {
+	var item fridge.Item
+	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+		http.Error(w, "Invalid JSON data", http.StatusBadRequest)
+		return
+	}
+
+	myFridge.Lock()
+	id, err := myFridge.AddItem(db, item.Name, item.Quantity, item.ExpirationDate)
+	if err != nil {
+		http.Error(w, "Error adding item", http.StatusInternalServerError)
+		log.Println("Error adding item", err)
+		return
+	}
+	myFridge.Unlock()
+
+	log.Println("added item to fridge")
+	dbItem, err := myFridge.GetItemByID(db, id)
+	if err != nil {
+		log.Println("Error getting items", err)
+		http.Error(w, "Unable to get items", http.StatusInternalServerError)
+		return
+	}
+	log.Println(dbItem)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"message": "Item added successfully"}`)
 }

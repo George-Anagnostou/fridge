@@ -24,11 +24,11 @@ type Fridge struct {
 }
 
 type Item struct {
-	ID             int
-	Name           string
-	Quantity       float64
-	ExpirationDate time.Time
-	LastChanged    time.Time
+	ID             int       `json:"id"`
+	Name           string    `json:"name"`
+	Quantity       float64   `json:"quantity"`
+	ExpirationDate time.Time `json:"expiration_date"`
+	LastChanged    time.Time `json:"last_changed"`
 }
 
 func (i Item) String() string {
