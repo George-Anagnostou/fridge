@@ -6,6 +6,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+var db *sql.DB
+
 func InitDB() (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", "./fridge.db")
 	if err != nil {

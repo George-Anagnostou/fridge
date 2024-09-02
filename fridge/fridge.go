@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -18,6 +19,7 @@ var (
 )
 
 type Fridge struct {
+	sync.Mutex
 	Items []Item
 }
 
@@ -55,34 +57,51 @@ func indentedString(item Item, indent string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (f *Fridge) AddItem(db *sql.DB, name string, quantity float64, expiration time.Time) error {
+func (f *Fridge) AddItem(db *sql.DB, name string, quantity float64, expiration time.Time) (int, error) {
 	insertSQL := "INSERT INTO fridge (name, quantity, expiration_date) VALUES (?, ?, ?)"
-	_, err := db.Exec(insertSQL, name, quantity, expiration.Format("2006-01-02"))
+	result, err := db.Exec(insertSQL, name, quantity, expiration.Format("2006-01-02"))
 	if err != nil {
-		return err
+		return 0, err
 	}
-	fmt.Printf("inserted %s into fridge\n", name)
-	return nil
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	return int(id), nil
 }
 
-func (f *Fridge) ListItems(db *sql.DB) error {
+func (f *Fridge) ListItems(db *sql.DB) ([]Item, error) {
 	rows, err := db.Query("SELECT id, name, quantity, expiration_date, last_changed FROM fridge")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
-	fmt.Println("Fridge contents")
+	var items []Item
 	for rows.Next() {
 		var item Item
 		err := rows.Scan(&item.ID, &item.Name, &item.Quantity, &item.ExpirationDate, &item.LastChanged)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
-		fmt.Println(item)
+		items = append(items, item)
 	}
-	return nil
+	return items, nil
+}
+
+func (f *Fridge) GetItemByID(db *sql.DB, id int) (Item, error) {
+	row := db.QueryRow("SELECT id, name, quantity, expiration_date, last_changed FROM fridge WHERE id = ?", id)
+
+	var item Item
+	err := row.Scan(&item.ID, &item.Name, &item.Quantity, &item.ExpirationDate, &item.LastChanged)
+	if err != nil {
+		return item, err
+	}
+
+	return item, nil
 }
 
 func (f *Fridge) RemoveItem(db *sql.DB, id int) error {
@@ -91,6 +110,5 @@ func (f *Fridge) RemoveItem(db *sql.DB, id int) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("successfully removed item")
 	return nil
 }
