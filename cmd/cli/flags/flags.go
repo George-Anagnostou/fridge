@@ -15,7 +15,6 @@ func Run() error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
 
 	// define CLI commands
 	addCmd := flag.NewFlagSet("add", flag.ExitOnError)
@@ -29,6 +28,9 @@ func Run() error {
 
 	// define flags for remove command
 	removeID := removeCmd.Int("id", 0, "ID of the item to remove")
+
+	// define flags for list command
+	getID := listCmd.Int("id", 0, "ID of item to get (optional)")
 
 	// check num args
 	if len(os.Args) < 2 {
@@ -45,14 +47,26 @@ func Run() error {
 		addCmd.Parse(os.Args[2:])
 		if *addName == "" {
 			fmt.Println("provide a name for the item")
-			fmt.Println(*addName)
 			return fridge.ErrNumArgs
 		}
 		expirationDate, err := time.Parse(fridge.DateFormat, *addExpiration)
 		if err != nil {
 			return err
 		}
-		return newFridge.AddItem(db, *addName, *addQuantity, expirationDate)
+
+		id, err := newFridge.AddItem(db, *addName, *addQuantity, expirationDate)
+		if err != nil {
+			return err
+		}
+
+		item, err := newFridge.GetItemByID(db, id)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("Added item :")
+		fmt.Println(item)
+		return err
 
 	case "list":
 		listCmd.Usage = func() {
@@ -60,7 +74,19 @@ func Run() error {
 			listCmd.PrintDefaults()
 		}
 		listCmd.Parse(os.Args[2:])
-		return newFridge.ListItems(db)
+		if *getID == 0 {
+			items, err := newFridge.ListItems(db)
+			fmt.Println("Fridge contents:")
+			for _, item := range items {
+				fmt.Println(item)
+			}
+			return err
+
+		}
+		item, err := newFridge.GetItemByID(db, *getID)
+		fmt.Printf("Fridge item %03d\n", *getID)
+		fmt.Println(item)
+		return err
 
 	case "remove":
 		removeCmd.Usage = func() {
@@ -72,6 +98,7 @@ func Run() error {
 			fmt.Println("provide the id of the item to remove")
 			return fridge.ErrNumArgs
 		}
+		fmt.Printf("Removing item %03d\n", *removeID)
 		return newFridge.RemoveItem(db, *removeID)
 
 	case "-h", "-help", "--help":

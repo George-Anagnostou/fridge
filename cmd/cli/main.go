@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/George-Anagnostou/fridge/flags"
+	"github.com/George-Anagnostou/fridge/cmd/cli/flags"
 )
 
 func main() {
