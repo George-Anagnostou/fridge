@@ -15,6 +15,7 @@ func Run() error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 
 	// define CLI commands
 	addCmd := flag.NewFlagSet("add", flag.ExitOnError)

@@ -56,6 +56,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("error initializing db: %v", err)
 	}
+	defer db.Close()
 
 	http.HandleFunc("/", listAndAddHandler)
 	http.HandleFunc("POST /remove", removeHandler)
