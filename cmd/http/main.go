@@ -110,7 +110,7 @@ func listAndAddHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Error with getting new item", http.StatusBadRequest)
 			return
 		}
-		log.Printf("\n%s", item)
+		log.Print(item.LogString())
 		myFridge.Unlock()
 	}
 
@@ -190,7 +190,7 @@ func postItemsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unable to get items", http.StatusInternalServerError)
 		return
 	}
-	log.Println(dbItem)
+	log.Println(dbItem.LogString())
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

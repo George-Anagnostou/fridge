@@ -32,13 +32,19 @@ type Item struct {
 }
 
 func (i Item) String() string {
-	return fmt.Sprintf(`-------------------------------------
+	return fmt.Sprintf(`
+-------------------------------------
 ID:                  %03d
 Name:                %s
 Quantity:            %.2f
 Expiration Date:     %s
 Last Changed:        %s
 -------------------------------------`, i.ID, i.Name, i.Quantity, i.ExpirationDate.Format(DateFormat), i.LastChanged.Format(DateFormat))
+}
+
+// LogString returns a structured string specifically for logging
+func (i Item) LogString() string {
+	return fmt.Sprintf("Item[ID=%03d, Name=%s, Quantity=%.2f, ExpirationDate=%s, LastChanged=%s]", i.ID, i.Name, i.Quantity, i.ExpirationDate, i.LastChanged)
 }
 
 func indentedString(item Item, indent string) string {
