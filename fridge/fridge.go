@@ -85,7 +85,7 @@ func (f *Fridge) ListItems(db *sql.DB) ([]Item, error) {
 	}
 	defer rows.Close()
 
-	var items []Item
+	items := []Item{}
 	for rows.Next() {
 		var item Item
 		err := rows.Scan(&item.ID, &item.Name, &item.Quantity, &item.ExpirationDate, &item.LastChanged)
