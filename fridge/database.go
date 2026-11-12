@@ -2,16 +2,15 @@ package fridge
 
 import (
 	"database/sql"
-	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 const DefaultDBPath = "./fridge.db"
-
-const busyTimeoutMS = 5000
 
 // DBPath returns the SQLite path from FRIDGE_DB, or DefaultDBPath if unset.
 func DBPath() string {
@@ -22,18 +21,30 @@ func DBPath() string {
 }
 
 func sqliteDSN(path string) string {
-	opts := fmt.Sprintf("_busy_timeout=%d&_foreign_keys=on", busyTimeoutMS)
-
 	if strings.HasPrefix(path, "file:") {
-		if strings.Contains(path, "?") {
-			return path + "&" + opts
+		u, err := url.Parse(path)
+		if err == nil {
+			q := u.Query()
+			q.Add("_pragma", "foreign_keys(1)")
+			q.Add("_pragma", "busy_timeout(5000)")
+			u.RawQuery = q.Encode()
+			return u.String()
 		}
-		return path + "?" + opts
 	}
-	if strings.Contains(path, "?") {
-		return "file:" + path + "&" + opts
+
+	abs := path
+	if resolved, err := filepath.Abs(path); err == nil {
+		abs = resolved
 	}
-	return "file:" + path + "?" + opts
+	u := url.URL{
+		Scheme: "file",
+		Path:   abs,
+	}
+	q := u.Query()
+	q.Add("_pragma", "foreign_keys(1)")
+	q.Add("_pragma", "busy_timeout(5000)")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func InitDB(path string) (*sql.DB, error) {
@@ -41,7 +52,7 @@ func InitDB(path string) (*sql.DB, error) {
 		path = DefaultDBPath
 	}
 
-	db, err := sql.Open("sqlite3", sqliteDSN(path))
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, err
 	}

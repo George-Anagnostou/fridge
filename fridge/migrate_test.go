@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestMigrateFreshDB(t *testing.T) {
@@ -49,7 +47,7 @@ func TestMigrateFreshDB(t *testing.T) {
 
 func TestMigrateLegacyDB(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
-	db, err := sql.Open("sqlite3", sqliteDSN(path))
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -124,7 +122,7 @@ func TestMigrateLegacyDB(t *testing.T) {
 
 func TestMigrateAddsAdminColumns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pre-admin.db")
-	db, err := sql.Open("sqlite3", sqliteDSN(path))
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

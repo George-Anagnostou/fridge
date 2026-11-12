@@ -70,8 +70,11 @@ The remote CLI talks to a server at http://localhost:8080. A successful `remove`
 
 ```sh
 go test ./...
+CGO_ENABLED=1 go test -race ./...
 ```
+
+The SQLite driver is pure Go (`modernc.org/sqlite`), so `CGO_ENABLED=0 go build ./...` works. Race tests still need CGO for the race detector.
 
 ## Makefile
 
-`make build` writes `fridge-local`, `fridge-remote`, `fridge-server`, and `fridge-invite` to `./build/`.
+`make build-server` cross-compiles a CGO-free Linux amd64 server to `dist/fridge-server-linux-amd64`. `make build` also writes the local CLI, remote CLI, and invite tool to `./build/`.
