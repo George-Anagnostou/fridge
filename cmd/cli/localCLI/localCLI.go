@@ -11,7 +11,7 @@ import (
 
 func Run() error {
 	// initialize DB
-	db, err := fridge.InitDB()
+	db, err := fridge.InitDB(fridge.DBPath())
 	if err != nil {
 		return err
 	}
