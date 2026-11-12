@@ -19,8 +19,8 @@ could deadlock. Build and test fixes: [PR #2](https://github.com/George-Anagnost
 - **Hosting:** a subdomain of a personal website (exact domain TBD at deploy
   time). HTTPS there is what makes phone camera scanning work.
 - **Users:** a public multi-user app. Sign-up is invite-only during
-  development. Each user can create fridge(s), add items to them, and invite
-  other users to share a fridge (membership).
+  development; only an admin can issue sign-up invites. Each user can create
+  fridge(s) and add items. Fridge-join invites are a separate member feature in the fridges PR.
 - **Auth:** email + password in the accounts PR, then a small follow-on PR
   for Sign in with Google (OAuth 2.0 / OpenID Connect, via
   `golang.org/x/oauth2` or stdlib). Verify the ID token or userinfo and link
@@ -28,8 +28,8 @@ could deadlock. Build and test fixes: [PR #2](https://github.com/George-Anagnost
   `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and callback base URL come from
   env, are never committed, and the feature is disabled when unset.
   Server-side sessions (HTTP-only secure cookie, `sessions` table). Passwords
-  hashed with bcrypt or argon2id. CSRF on form posts. Single-use, expiring
-  invite tokens for sign-up and for joining a fridge.
+  hashed with bcrypt or argon2id. CSRF on form posts. Sign-up invites and
+  fridge-join invites are separate; only admins create sign-up invites.
 - **Data:** items are scoped to a fridge. The product lookup cache is global
   (shared across users).
 - **Lookup chain:** cache → Open Food Facts API v3
@@ -61,9 +61,10 @@ Each PR should be independently reviewable and mergeable to `master` without dep
 2. **Migrations, users, sessions, and invite-only sign-up**
    - Numbered SQLite migrations; `users` and `sessions` tables; email +
      password register/login/logout; CSRF; HTTP-only secure session cookie.
-   - Sign-up requires a single-use, expiring invite token.
+   - Sign-up requires a single-use, expiring invite token. Only admins can
+     create sign-up invites (`users.is_admin`).
    - Tests: migrate a fresh and an original-schema DB; reject unauthenticated
-     writes; expired or reused invites fail.
+     writes; expired or reused invites fail; non-admins cannot create sign-up invites.
 3. **Sign in with Google**
    - OAuth 2.0 / OpenID Connect; verify ID token or userinfo; link by
      verified email. Still invite-only for new accounts. Disabled when
@@ -71,7 +72,7 @@ Each PR should be independently reviewable and mergeable to `master` without dep
    - Tests: link existing account by verified email; new email without an
      invite is rejected; feature is off when credentials are missing.
 4. **Fridges, membership, and item scoping**
-   - `fridges` and membership tables; invite tokens to join a fridge.
+   - `fridges` and membership tables; fridge-join invites (not sign-up invites).
    - All items scoped to a fridge; migrate existing rows into a default fridge.
    - Tests: isolation between fridges; members can read/write; non-members cannot;
      join invites are single-use and expiring.
@@ -117,4 +118,3 @@ Each PR should be independently reviewable and mergeable to `master` without dep
 - **Multiple fridges and roles:** may a user own more than one fridge (default yes)?
   Roles: owner + member (default).
 - **Same barcode again:** new lot/row (default, so expiries stay distinct) vs merge quantities.
-- **Who can issue sign-up invites:** any existing user, or admin only?
