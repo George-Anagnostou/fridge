@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/George-Anagnostou/fridge/auth"
@@ -157,7 +156,13 @@ func (s *server) loginForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) loginSubmit(w http.ResponseWriter, r *http.Request) {
-	if !s.loginLimit.allow(clientIP(r)) {
+	ok, err := auth.AllowLoginAttempt(s.db, clientIP(r), time.Now())
+	if err != nil {
+		http.Error(w, "Unable to process login", http.StatusInternalServerError)
+		log.Println("login attempt:", err)
+		return
+	}
+	if !ok {
 		http.Error(w, "Too many login attempts, try again later", http.StatusTooManyRequests)
 		return
 	}
@@ -272,48 +277,30 @@ func urlQueryEscape(v string) string {
 	return url.QueryEscape(v)
 }
 
+func trustProxyFromEnv() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("TRUST_PROXY")))
+	return v == "1" || v == "true" || v == "yes"
+}
+
 func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
-type attemptLimiter struct {
-	mu      sync.Mutex
-	hits    map[string][]time.Time
-	window  time.Duration
-	maxHits int
-}
-
-func newAttemptLimiter(window time.Duration, maxHits int) *attemptLimiter {
-	return &attemptLimiter{
-		hits:    map[string][]time.Time{},
-		window:  window,
-		maxHits: maxHits,
-	}
-}
-
-func (l *attemptLimiter) allow(key string) bool {
-	if l == nil {
-		return true
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	now := time.Now()
-	cut := now.Add(-l.window)
-	prev := l.hits[key]
-	kept := prev[:0]
-	for _, ts := range prev {
-		if ts.After(cut) {
-			kept = append(kept, ts)
+	if trustProxyFromEnv() {
+		if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
+			return stripHostPort(ip)
+		}
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			first := strings.TrimSpace(strings.Split(xff, ",")[0])
+			if first != "" {
+				return stripHostPort(first)
+			}
 		}
 	}
-	if len(kept) >= l.maxHits {
-		l.hits[key] = kept
-		return false
+	return stripHostPort(r.RemoteAddr)
+}
+
+func stripHostPort(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
 	}
-	l.hits[key] = append(kept, now)
-	return true
+	return host
 }

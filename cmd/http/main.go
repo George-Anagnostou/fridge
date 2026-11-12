@@ -57,7 +57,6 @@ type server struct {
 	tmpl         *template.Template
 	cookieSecure bool
 	sessionTTL   time.Duration
-	loginLimit   *attemptLimiter
 }
 
 func newMux(db *sql.DB) http.Handler {
@@ -66,7 +65,6 @@ func newMux(db *sql.DB) http.Handler {
 		tmpl:         tmpl,
 		cookieSecure: cookieSecureFromEnv(),
 		sessionTTL:   auth.DefaultSessionTTL,
-		loginLimit:   newAttemptLimiter(10*time.Minute, 10),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /login", s.ensureCSRF(s.loginForm))

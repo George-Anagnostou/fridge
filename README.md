@@ -48,6 +48,11 @@ Session cookies are HTTP-only and SameSite=Lax. They are only marked `Secure`
 when `COOKIE_SECURE=1` (or `true` / `yes`) is set, which is what you want
 behind HTTPS. Leave it unset for local `http://localhost` development.
 
+Login attempts are rate-limited in SQLite (10 tries per 10 minutes per IP).
+The server uses the connection address by default. Behind nginx, set
+`TRUST_PROXY=1` so it uses `X-Real-IP` (falling back to the first
+`X-Forwarded-For` entry).
+
 The local CLI talks to the database directly and does not log in. The remote
 CLI is not yet updated for authentication, so its HTTP calls will be rejected
 until it can send a session.

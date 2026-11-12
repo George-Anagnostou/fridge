@@ -542,3 +542,63 @@ func TestAdminGrantingInviteSignsUpAdmin(t *testing.T) {
 		t.Fatalf("admin home page missing invites link, got: %s", body)
 	}
 }
+
+func TestClientIPTrustProxy(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/login", nil)
+	req.RemoteAddr = "10.0.0.8:1234"
+	req.Header.Set("X-Real-IP", "203.0.113.10")
+	req.Header.Set("X-Forwarded-For", "198.51.100.2, 10.0.0.1")
+
+	t.Setenv("TRUST_PROXY", "")
+	if got := clientIP(req); got != "10.0.0.8" {
+		t.Fatalf("without TRUST_PROXY clientIP = %q, want 10.0.0.8", got)
+	}
+
+	t.Setenv("TRUST_PROXY", "1")
+	if got := clientIP(req); got != "203.0.113.10" {
+		t.Fatalf("TRUST_PROXY with X-Real-IP clientIP = %q, want 203.0.113.10", got)
+	}
+
+	req.Header.Del("X-Real-IP")
+	if got := clientIP(req); got != "198.51.100.2" {
+		t.Fatalf("TRUST_PROXY with X-Forwarded-For clientIP = %q, want 198.51.100.2", got)
+	}
+
+	req.Header.Del("X-Forwarded-For")
+	if got := clientIP(req); got != "10.0.0.8" {
+		t.Fatalf("TRUST_PROXY with no headers clientIP = %q, want 10.0.0.8", got)
+	}
+}
+
+func TestLoginAttemptLimitHTTP(t *testing.T) {
+	srv, db := testServer(t)
+	if _, err := auth.CreateUser(db, "user@example.com", "password123"); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	client := newClient(t, srv)
+
+	token, _, status := getCSRF(t, client, srv.URL+"/login")
+	if status != http.StatusOK {
+		t.Fatalf("GET /login status = %d", status)
+	}
+	// Seed the window with the limit number of attempts.
+	now := time.Now()
+	for i := 0; i < auth.LoginAttemptLimit; i++ {
+		ok, err := auth.AllowLoginAttempt(db, "127.0.0.1", now.Add(time.Duration(i)*time.Second))
+		if err != nil || !ok {
+			t.Fatalf("seed attempt %d: %v %v", i, ok, err)
+		}
+	}
+	resp, err := client.PostForm(srv.URL+"/login", url.Values{
+		"csrf_token": {token},
+		"email":      {"user@example.com"},
+		"password":   {"password123"},
+	})
+	if err != nil {
+		t.Fatalf("POST /login: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("POST /login over limit status = %d, want 429", resp.StatusCode)
+	}
+}

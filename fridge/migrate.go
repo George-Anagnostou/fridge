@@ -16,6 +16,7 @@ func allMigrations() []migration {
 		{1, "initial_fridge_schema", migrate001InitialFridgeSchema},
 		{2, "users_sessions_invites", migrate002UsersSessionsInvites},
 		{3, "user_admin_and_invite_meta", migrate003UserAdminAndInviteMeta},
+		{4, "login_attempts", migrate004LoginAttempts},
 	}
 }
 
@@ -158,6 +159,22 @@ func migrate003UserAdminAndInviteMeta(db *sql.DB) error {
 		`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE invites ADD COLUMN created_by INTEGER REFERENCES users(id)`,
 		`ALTER TABLE invites ADD COLUMN grants_admin INTEGER NOT NULL DEFAULT 0`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrate004LoginAttempts(db *sql.DB) error {
+	stmts := []string{
+		`CREATE TABLE login_attempts (
+			ip TEXT NOT NULL,
+			at TEXT NOT NULL
+		)`,
+		`CREATE INDEX idx_login_attempts_ip_at ON login_attempts (ip, at)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
