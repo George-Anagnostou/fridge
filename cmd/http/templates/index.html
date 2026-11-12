@@ -1,4 +1,3 @@
-<!-- cmd/http/templates/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,9 +7,18 @@
 </head>
 <body>
     <h1>Fridge Manager</h1>
+    {{if .Email}}
+    <p>
+        Signed in as {{.Email}}
+        <form action="/logout" method="POST" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+            <button type="submit">Log out</button>
+        </form>
+    </p>
+    {{end}}
 
-    <!-- Form to add a new item -->
     <form action="/" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
         <label for="name">Item Name:</label>
         <input type="text" id="name" name="name" required>
         <br>
@@ -25,12 +33,12 @@
 
     <h2>Items in the Fridge</h2>
 
-    <!-- List of items with a remove button -->
     <ol>
     {{range .Items}}
         <li>
             {{.Name}} - Quantity: {{.Quantity}} - Expires on {{.ExpirationDate}}
             <form action="/remove" method="POST" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <input type="hidden" name="id" value="{{.ID}}">
                 <button type="submit">Remove</button>
             </form>
@@ -41,4 +49,3 @@
     </ol>
 </body>
 </html>
-

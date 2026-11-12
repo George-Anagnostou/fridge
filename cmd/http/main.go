@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/George-Anagnostou/fridge/auth"
 	"github.com/George-Anagnostou/fridge/fridge"
 )
 
@@ -21,6 +22,8 @@ var templateFS embed.FS
 
 type RenderFridge struct {
 	Items []RenderItem
+	CSRF  string
+	Email string
 }
 
 type RenderItem struct {
@@ -48,18 +51,32 @@ func toRenderItems(items []fridge.Item) []RenderItem {
 var tmpl = template.Must(template.ParseFS(templateFS, "templates/*.html"))
 
 type server struct {
-	db     *sql.DB
-	fridge fridge.Fridge
-	tmpl   *template.Template
+	db           *sql.DB
+	fridge       fridge.Fridge
+	tmpl         *template.Template
+	cookieSecure bool
+	sessionTTL   time.Duration
+	loginLimit   *attemptLimiter
 }
 
 func newMux(db *sql.DB) http.Handler {
-	s := &server{db: db, tmpl: tmpl}
+	s := &server{
+		db:           db,
+		tmpl:         tmpl,
+		cookieSecure: cookieSecureFromEnv(),
+		sessionTTL:   auth.DefaultSessionTTL,
+		loginLimit:   newAttemptLimiter(10*time.Minute, 10),
+	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.listAndAddHandler)
-	mux.HandleFunc("POST /remove", s.removeHandler)
-	mux.HandleFunc("GET /items", s.getItemsHandler)
-	mux.HandleFunc("POST /items", s.postItemsHandler)
+	mux.HandleFunc("GET /login", s.ensureCSRF(s.loginForm))
+	mux.HandleFunc("POST /login", s.ensureCSRF(s.requireCSRFOnPost(s.loginSubmit)))
+	mux.HandleFunc("GET /signup", s.ensureCSRF(s.signupForm))
+	mux.HandleFunc("POST /signup", s.ensureCSRF(s.requireCSRFOnPost(s.signupSubmit)))
+	mux.HandleFunc("POST /logout", s.ensureCSRF(s.requireCSRFOnPost(s.logout)))
+	mux.HandleFunc("/", s.protectHTML(s.listAndAddHandler))
+	mux.HandleFunc("POST /remove", s.protectHTML(s.removeHandler))
+	mux.HandleFunc("GET /items", s.protectAPI(s.getItemsHandler))
+	mux.HandleFunc("POST /items", s.protectAPI(s.postItemsHandler))
 	return mux
 }
 
@@ -132,7 +149,10 @@ func (s *server) listAndAddHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := RenderFridge{Items: toRenderItems(items)}
+	data := RenderFridge{Items: toRenderItems(items), CSRF: s.csrfToken(r)}
+	if u, ok := userFrom(r); ok {
+		data.Email = u.Email
+	}
 
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		http.Error(w, "Unable to render template", http.StatusInternalServerError)
