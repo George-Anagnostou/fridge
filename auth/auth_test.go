@@ -169,3 +169,49 @@ func TestInviteRedeemOnceAndExpiry(t *testing.T) {
 		t.Fatalf("RedeemInvite(expired) = %v, want ErrInviteExpired", err)
 	}
 }
+
+func TestRegisterWithInvite(t *testing.T) {
+	db := setupDB(t)
+
+	_, err := RegisterWithInvite(db, "user@example.com", "password123", "")
+	if !errors.Is(err, ErrInviteNotFound) {
+		t.Fatalf("RegisterWithInvite(no token) = %v, want ErrInviteNotFound", err)
+	}
+	_, err = RegisterWithInvite(db, "user@example.com", "password123", "bogus")
+	if !errors.Is(err, ErrInviteNotFound) {
+		t.Fatalf("RegisterWithInvite(bad token) = %v, want ErrInviteNotFound", err)
+	}
+
+	token, _, err := CreateInvite(db, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	u, err := RegisterWithInvite(db, "User@Example.com", "password123", token)
+	if err != nil {
+		t.Fatalf("RegisterWithInvite: %v", err)
+	}
+	if u.Email != "user@example.com" {
+		t.Errorf("Email = %q", u.Email)
+	}
+	if _, err := RegisterWithInvite(db, "other@example.com", "password123", token); !errors.Is(err, ErrInviteUsed) {
+		t.Fatalf("RegisterWithInvite(reused) = %v, want ErrInviteUsed", err)
+	}
+	// The first invite was used; a failed attempt must not consume a new invite
+	// when the email is already taken... actually we used a different email with same token.
+	// Add a fresh invite and try a taken email — invite should remain usable.
+	token2, _, err := CreateInvite(db, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateInvite 2: %v", err)
+	}
+	_, err = RegisterWithInvite(db, "user@example.com", "password123", token2)
+	if !errors.Is(err, ErrEmailTaken) {
+		t.Fatalf("RegisterWithInvite(taken) = %v, want ErrEmailTaken", err)
+	}
+	u2, err := RegisterWithInvite(db, "other@example.com", "password123", token2)
+	if err != nil {
+		t.Fatalf("RegisterWithInvite after taken-email failure: %v", err)
+	}
+	if u2.Email != "other@example.com" {
+		t.Errorf("Email = %q", u2.Email)
+	}
+}
