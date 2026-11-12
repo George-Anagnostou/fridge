@@ -215,3 +215,62 @@ func TestRegisterWithInvite(t *testing.T) {
 		t.Errorf("Email = %q", u2.Email)
 	}
 }
+
+func TestAdminGrantingInvite(t *testing.T) {
+	db := setupDB(t)
+	token, _, err := CreateInviteSpec(db, InviteSpec{TTL: time.Hour, GrantsAdmin: true})
+	if err != nil {
+		t.Fatalf("CreateInviteSpec: %v", err)
+	}
+	u, err := RegisterWithInvite(db, "admin@example.com", "password123", token)
+	if err != nil {
+		t.Fatalf("RegisterWithInvite: %v", err)
+	}
+	if !u.IsAdmin {
+		t.Fatal("expected IsAdmin true from grants_admin invite")
+	}
+	got, err := UserByID(db, u.ID)
+	if err != nil {
+		t.Fatalf("UserByID: %v", err)
+	}
+	if !got.IsAdmin {
+		t.Fatal("stored user is not admin")
+	}
+
+	// A normal invite does not grant admin.
+	token2, _, err := CreateInvite(db, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	u2, err := RegisterWithInvite(db, "user@example.com", "password123", token2)
+	if err != nil {
+		t.Fatalf("RegisterWithInvite normal: %v", err)
+	}
+	if u2.IsAdmin {
+		t.Fatal("normal invite should not grant admin")
+	}
+}
+
+func TestInviteCreatedBy(t *testing.T) {
+	db := setupDB(t)
+	admin, err := CreateUser(db, "admin@example.com", "password123")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	// Promote via SQL so we have an existing admin id to attribute.
+	if _, err := db.Exec(`UPDATE users SET is_admin = 1 WHERE id = ?`, admin.ID); err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	id := admin.ID
+	token, _, err := CreateInviteSpec(db, InviteSpec{TTL: time.Hour, CreatedBy: &id})
+	if err != nil {
+		t.Fatalf("CreateInviteSpec: %v", err)
+	}
+	var createdBy sql.NullInt64
+	if err := db.QueryRow(`SELECT created_by FROM invites WHERE token_hash = ?`, HashToken(token)).Scan(&createdBy); err != nil {
+		t.Fatalf("lookup created_by: %v", err)
+	}
+	if !createdBy.Valid || createdBy.Int64 != id {
+		t.Fatalf("created_by = %v, want %d", createdBy, id)
+	}
+}

@@ -14,7 +14,19 @@ var (
 	ErrInviteUsed     = errors.New("invite already used")
 )
 
+// InviteSpec describes a new sign-up invite.
+type InviteSpec struct {
+	TTL         time.Duration
+	CreatedBy   *int64 // optional; nil for a locally bootstrapped invite
+	GrantsAdmin bool
+}
+
 func CreateInvite(db *sql.DB, ttl time.Duration) (plainToken string, expiresAt time.Time, err error) {
+	return CreateInviteSpec(db, InviteSpec{TTL: ttl})
+}
+
+func CreateInviteSpec(db *sql.DB, spec InviteSpec) (plainToken string, expiresAt time.Time, err error) {
+	ttl := spec.TTL
 	if ttl <= 0 {
 		ttl = DefaultInviteTTL
 	}
@@ -23,9 +35,17 @@ func CreateInvite(db *sql.DB, ttl time.Duration) (plainToken string, expiresAt t
 		return "", time.Time{}, err
 	}
 	expiresAt = time.Now().UTC().Add(ttl)
+	var createdBy any
+	if spec.CreatedBy != nil {
+		createdBy = *spec.CreatedBy
+	}
+	grantsAdmin := 0
+	if spec.GrantsAdmin {
+		grantsAdmin = 1
+	}
 	_, err = db.Exec(
-		`INSERT INTO invites (token_hash, expires_at) VALUES (?, ?)`,
-		HashToken(plainToken), expiresAt.Format(time.RFC3339),
+		`INSERT INTO invites (token_hash, expires_at, created_by, grants_admin) VALUES (?, ?, ?, ?)`,
+		HashToken(plainToken), expiresAt.Format(time.RFC3339), createdBy, grantsAdmin,
 	)
 	if err != nil {
 		return "", time.Time{}, err
@@ -102,10 +122,11 @@ func RegisterWithInvite(db *sql.DB, email, password, inviteToken string) (User, 
 
 	var expires string
 	var usedAt sql.NullString
+	var grantsAdmin int
 	err = tx.QueryRow(
-		`SELECT expires_at, used_at FROM invites WHERE token_hash = ?`,
+		`SELECT expires_at, used_at, grants_admin FROM invites WHERE token_hash = ?`,
 		HashToken(inviteToken),
-	).Scan(&expires, &usedAt)
+	).Scan(&expires, &usedAt, &grantsAdmin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrInviteNotFound
 	}
@@ -124,7 +145,7 @@ func RegisterWithInvite(db *sql.DB, email, password, inviteToken string) (User, 
 		return User{}, ErrInviteExpired
 	}
 
-	res, err := tx.Exec(`INSERT INTO users (email, password_hash) VALUES (?, ?)`, email, hash)
+	res, err := tx.Exec(`INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, ?)`, email, hash, grantsAdmin)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return User{}, ErrEmailTaken
@@ -153,5 +174,5 @@ func RegisterWithInvite(db *sql.DB, email, password, inviteToken string) (User, 
 	if err := tx.Commit(); err != nil {
 		return User{}, err
 	}
-	return User{ID: id, Email: email}, nil
+	return User{ID: id, Email: email, IsAdmin: grantsAdmin != 0}, nil
 }

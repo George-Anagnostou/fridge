@@ -15,6 +15,7 @@ func allMigrations() []migration {
 	return []migration{
 		{1, "initial_fridge_schema", migrate001InitialFridgeSchema},
 		{2, "users_sessions_invites", migrate002UsersSessionsInvites},
+		{3, "user_admin_and_invite_meta", migrate003UserAdminAndInviteMeta},
 	}
 }
 
@@ -143,6 +144,20 @@ func migrate002UsersSessionsInvites(db *sql.DB) error {
 		)`,
 		`CREATE INDEX idx_sessions_expires_at ON sessions (expires_at)`,
 		`CREATE INDEX idx_invites_expires_at ON invites (expires_at)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrate003UserAdminAndInviteMeta(db *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE invites ADD COLUMN created_by INTEGER REFERENCES users(id)`,
+		`ALTER TABLE invites ADD COLUMN grants_admin INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {

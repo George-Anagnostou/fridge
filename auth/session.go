@@ -45,12 +45,13 @@ func SessionByToken(db *sql.DB, plainToken string) (Session, error) {
 	}
 	var s Session
 	var expires string
+	var isAdmin int
 	err := db.QueryRow(`
-		SELECT s.id, s.user_id, s.expires_at, u.id, u.email
+		SELECT s.id, s.user_id, s.expires_at, u.id, u.email, u.is_admin
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = ?`, HashToken(plainToken),
-	).Scan(&s.ID, &s.UserID, &expires, &s.User.ID, &s.User.Email)
+	).Scan(&s.ID, &s.UserID, &expires, &s.User.ID, &s.User.Email, &isAdmin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrSessionNotFound
 	}
@@ -62,6 +63,7 @@ func SessionByToken(db *sql.DB, plainToken string) (Session, error) {
 		return Session{}, err
 	}
 	s.ExpiresAt = exp
+	s.User.IsAdmin = isAdmin != 0
 	if !exp.After(time.Now().UTC()) {
 		return Session{}, ErrSessionExpired
 	}

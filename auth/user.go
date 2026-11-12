@@ -25,8 +25,9 @@ func init() {
 }
 
 type User struct {
-	ID    int64
-	Email string
+	ID      int64
+	Email   string
+	IsAdmin bool
 }
 
 func NormalizeEmail(email string) (string, error) {
@@ -72,26 +73,30 @@ func UserByEmail(db *sql.DB, email string) (User, string, error) {
 	}
 	var u User
 	var hash string
-	err = db.QueryRow(`SELECT id, email, password_hash FROM users WHERE email = ?`, email).
-		Scan(&u.ID, &u.Email, &hash)
+	var isAdmin int
+	err = db.QueryRow(`SELECT id, email, password_hash, is_admin FROM users WHERE email = ?`, email).
+		Scan(&u.ID, &u.Email, &hash, &isAdmin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, "", ErrUserNotFound
 	}
 	if err != nil {
 		return User{}, "", err
 	}
+	u.IsAdmin = isAdmin != 0
 	return u, hash, nil
 }
 
 func UserByID(db *sql.DB, id int64) (User, error) {
 	var u User
-	err := db.QueryRow(`SELECT id, email FROM users WHERE id = ?`, id).Scan(&u.ID, &u.Email)
+	var isAdmin int
+	err := db.QueryRow(`SELECT id, email, is_admin FROM users WHERE id = ?`, id).Scan(&u.ID, &u.Email, &isAdmin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}
 	if err != nil {
 		return User{}, err
 	}
+	u.IsAdmin = isAdmin != 0
 	return u, nil
 }
 

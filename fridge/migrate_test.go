@@ -25,8 +25,8 @@ func TestMigrateFreshDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("appliedMigrationIDs: %v", err)
 	}
-	if !ids[1] || !ids[2] {
-		t.Fatalf("applied migrations = %v, want 1 and 2", ids)
+	if !ids[1] || !ids[2] || !ids[3] {
+		t.Fatalf("applied migrations = %v, want 1, 2, and 3", ids)
 	}
 
 	// Re-running InitDB/Migrate is a no-op and keeps data.
@@ -117,7 +117,80 @@ func TestMigrateLegacyDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("appliedMigrationIDs: %v", err)
 	}
-	if !ids[1] || !ids[2] {
-		t.Fatalf("applied migrations = %v, want 1 (stamped) and 2", ids)
+	if !ids[1] || !ids[2] || !ids[3] {
+		t.Fatalf("applied migrations = %v, want 1 (stamped), 2, and 3", ids)
+	}
+}
+
+func TestMigrateAddsAdminColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-admin.db")
+	db, err := sql.Open("sqlite3", sqliteDSN(path))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := db.Ping(); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+	if err := migrate001InitialFridgeSchema(db); err != nil {
+		t.Fatalf("migrate 1: %v", err)
+	}
+	if err := migrate002UsersSessionsInvites(db); err != nil {
+		t.Fatalf("migrate 2: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			id INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+		t.Fatalf("schema_migrations: %v", err)
+	}
+	if err := recordMigration(db, 1, "initial_fridge_schema"); err != nil {
+		t.Fatalf("stamp 1: %v", err)
+	}
+	if err := recordMigration(db, 2, "users_sessions_invites"); err != nil {
+		t.Fatalf("stamp 2: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO users (email, password_hash) VALUES (?, ?)`, "old@example.com", "x"); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	db.Close()
+
+	migrated, err := InitDB(path)
+	if err != nil {
+		t.Fatalf("InitDB on pre-admin file: %v", err)
+	}
+	t.Cleanup(func() { migrated.Close() })
+
+	var isAdmin int
+	if err := migrated.QueryRow(`SELECT is_admin FROM users WHERE email = ?`, "old@example.com").Scan(&isAdmin); err != nil {
+		t.Fatalf("is_admin column missing or row lost: %v", err)
+	}
+	if isAdmin != 0 {
+		t.Fatalf("is_admin = %d, want 0 default", isAdmin)
+	}
+
+	var grants, createdBy sql.NullInt64
+	// New invite columns must exist and accept defaults/NULL.
+	if _, err := migrated.Exec(
+		`INSERT INTO invites (token_hash, expires_at) VALUES (?, ?)`,
+		"testhash", "2026-12-01T00:00:00Z",
+	); err != nil {
+		t.Fatalf("insert invite after migrate 3: %v", err)
+	}
+	if err := migrated.QueryRow(`SELECT grants_admin, created_by FROM invites WHERE token_hash = ?`, "testhash").
+		Scan(&grants, &createdBy); err != nil {
+		t.Fatalf("invite admin columns missing: %v", err)
+	}
+	if grants.Int64 != 0 || createdBy.Valid {
+		t.Fatalf("grants_admin=%v created_by=%v, want 0 and NULL", grants, createdBy)
+	}
+
+	ids, err := appliedMigrationIDs(migrated)
+	if err != nil {
+		t.Fatalf("appliedMigrationIDs: %v", err)
+	}
+	if !ids[3] {
+		t.Fatalf("applied migrations = %v, want 3", ids)
 	}
 }
