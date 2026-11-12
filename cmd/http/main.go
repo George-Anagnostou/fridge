@@ -21,9 +21,10 @@ import (
 var templateFS embed.FS
 
 type RenderFridge struct {
-	Items []RenderItem
-	CSRF  string
-	Email string
+	Items   []RenderItem
+	CSRF    string
+	Email   string
+	IsAdmin bool
 }
 
 type RenderItem struct {
@@ -73,6 +74,8 @@ func newMux(db *sql.DB) http.Handler {
 	mux.HandleFunc("GET /signup", s.ensureCSRF(s.signupForm))
 	mux.HandleFunc("POST /signup", s.ensureCSRF(s.requireCSRFOnPost(s.signupSubmit)))
 	mux.HandleFunc("POST /logout", s.ensureCSRF(s.requireCSRFOnPost(s.logout)))
+	mux.HandleFunc("GET /admin/invites", s.requireAdmin(s.adminInvitesForm))
+	mux.HandleFunc("POST /admin/invites", s.requireAdmin(s.adminInvitesSubmit))
 	mux.HandleFunc("/", s.protectHTML(s.listAndAddHandler))
 	mux.HandleFunc("POST /remove", s.protectHTML(s.removeHandler))
 	mux.HandleFunc("GET /items", s.protectAPI(s.getItemsHandler))
@@ -152,6 +155,7 @@ func (s *server) listAndAddHandler(w http.ResponseWriter, r *http.Request) {
 	data := RenderFridge{Items: toRenderItems(items), CSRF: s.csrfToken(r)}
 	if u, ok := userFrom(r); ok {
 		data.Email = u.Email
+		data.IsAdmin = u.IsAdmin
 	}
 
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {

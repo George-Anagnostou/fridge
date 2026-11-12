@@ -101,6 +101,32 @@ func signup(t *testing.T, srv *httptest.Server, db *sql.DB, client *http.Client,
 	}
 }
 
+func signupAdmin(t *testing.T, srv *httptest.Server, db *sql.DB, client *http.Client, email, password string) {
+	t.Helper()
+	invite, _, err := auth.CreateInviteSpec(db, auth.InviteSpec{TTL: time.Hour, GrantsAdmin: true})
+	if err != nil {
+		t.Fatalf("CreateInviteSpec: %v", err)
+	}
+	token, _, status := getCSRF(t, client, srv.URL+"/signup?token="+url.QueryEscape(invite))
+	if status != http.StatusOK {
+		t.Fatalf("GET /signup status = %d", status)
+	}
+	resp, err := client.PostForm(srv.URL+"/signup", url.Values{
+		"csrf_token": {token},
+		"token":      {invite},
+		"email":      {email},
+		"password":   {password},
+	})
+	if err != nil {
+		t.Fatalf("POST /signup admin: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusSeeOther {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /signup admin status = %d; body: %s", resp.StatusCode, b)
+	}
+}
+
 func TestGetIndexAnyCwd(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -418,5 +444,101 @@ func TestCSRFRejection(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("POST /login without csrf status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestNonAdminCannotCreateInvites(t *testing.T) {
+	srv, db := testServer(t)
+	client := newClient(t, srv)
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	signup(t, srv, db, client, "user@example.com", "password123")
+
+	resp, err := client.Get(srv.URL + "/admin/invites")
+	if err != nil {
+		t.Fatalf("GET /admin/invites: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /admin/invites as non-admin status = %d, want 403; body: %s", resp.StatusCode, body)
+	}
+
+	token, _, status := getCSRF(t, client, srv.URL+"/")
+	if status != http.StatusOK {
+		t.Fatalf("GET / status = %d", status)
+	}
+	resp, err = client.PostForm(srv.URL+"/admin/invites", url.Values{"csrf_token": {token}})
+	if err != nil {
+		t.Fatalf("POST /admin/invites: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("POST /admin/invites as non-admin status = %d, want 403; body: %s", resp.StatusCode, body)
+	}
+}
+
+func TestAdminCanCreateSignUpInvite(t *testing.T) {
+	srv, db := testServer(t)
+	client := newClient(t, srv)
+	signupAdmin(t, srv, db, client, "admin@example.com", "password123")
+
+	token, body, status := getCSRF(t, client, srv.URL+"/admin/invites")
+	if status != http.StatusOK {
+		t.Fatalf("GET /admin/invites as admin status = %d; body: %s", status, body)
+	}
+
+	resp, err := client.PostForm(srv.URL+"/admin/invites", url.Values{"csrf_token": {token}})
+	if err != nil {
+		t.Fatalf("POST /admin/invites: %v", err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /admin/invites status = %d; body: %s", resp.StatusCode, out)
+	}
+	if !strings.Contains(string(out), "/signup?token=") {
+		t.Fatalf("expected invite link in body, got: %s", out)
+	}
+
+	// The link should create a non-admin user.
+	m := regexp.MustCompile(`/signup\?token=([^"&\s<]+)`).FindStringSubmatch(string(out))
+	if len(m) != 2 {
+		t.Fatalf("could not parse invite token from: %s", out)
+	}
+	inviteToken, err := url.QueryUnescape(m[1])
+	if err != nil {
+		t.Fatalf("unescape token: %v", err)
+	}
+	u, err := auth.RegisterWithInvite(db, "newbie@example.com", "password123", inviteToken)
+	if err != nil {
+		t.Fatalf("RegisterWithInvite via admin link: %v", err)
+	}
+	if u.IsAdmin {
+		t.Fatal("admin-created sign-up invite should not grant admin")
+	}
+}
+
+func TestAdminGrantingInviteSignsUpAdmin(t *testing.T) {
+	srv, db := testServer(t)
+	client := newClient(t, srv)
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	signupAdmin(t, srv, db, client, "admin@example.com", "password123")
+
+	resp, err := client.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET / status = %d; body: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "/admin/invites") {
+		t.Fatalf("admin home page missing invites link, got: %s", body)
 	}
 }

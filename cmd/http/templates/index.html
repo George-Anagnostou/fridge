@@ -10,6 +10,7 @@
     {{if .Email}}
     <p>
         Signed in as {{.Email}}
+        {{if .IsAdmin}} · <a href="/admin/invites">Sign-up invites</a>{{end}}
         <form action="/logout" method="POST" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{.CSRF}}">
             <button type="submit">Log out</button>

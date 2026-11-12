@@ -1,7 +1,8 @@
 # The Fridge
 
 A simple personal inventory app (Go + SQLite). Item pages and APIs require a
-logged-in account. Sign-up is invite-only.
+logged-in account. Sign-up is invite-only; only an admin can create sign-up
+invites. (Inviting someone to share a fridge is a separate feature.)
 
 ## Run locally
 
@@ -25,21 +26,23 @@ FRIDGE_DB=/tmp/fridge.db PORT=3000 ./fridge-server
 Then open http://localhost:8080 (or the port you set). You will be redirected to
 log in.
 
-### First invite
+### First admin
 
-Create a single-use invite and print a sign-up link (uses `FRIDGE_DB`, default
-`./fridge.db`):
+Bootstrap the first admin with an invite that grants admin on sign-up (uses
+`FRIDGE_DB`, default `./fridge.db`). No credentials are hardcoded:
 
 ```sh
-go run ./cmd/invite
+go run ./cmd/invite -admin
 ```
 
 ```sh
-FRIDGE_DB=/tmp/fridge.db go run ./cmd/invite -ttl 24h -base-url http://localhost:8080
+FRIDGE_DB=/tmp/fridge.db go run ./cmd/invite -admin -ttl 24h -base-url http://localhost:8080
 ```
 
-Open the printed `Sign up:` URL, create an account with email and password
-(at least 8 characters), then log in at `/login` later as needed.
+Open the printed `Sign up:` URL and create an account (password at least 8
+characters). That account can sign in at `/login` and create further sign-up
+invites at `/admin/invites`. Those links do not grant admin; use
+`go run ./cmd/invite -admin` again if another admin is needed.
 
 Session cookies are HTTP-only and SameSite=Lax. They are only marked `Secure`
 when `COOKIE_SECURE=1` (or `true` / `yes`) is set, which is what you want
