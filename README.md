@@ -75,7 +75,7 @@ go test ./...
 CGO_ENABLED=1 go test -race ./...
 ```
 
-The SQLite driver is pure Go (`modernc.org/sqlite`), so `CGO_ENABLED=0 go build ./...` works. Race tests still need CGO for the race detector.
+The module requires Go 1.27.4. The SQLite driver is pure Go (`modernc.org/sqlite`), so `CGO_ENABLED=0 go build ./...` works. Race tests still need CGO for the race detector.
 
 ## Makefile
 
