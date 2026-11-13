@@ -22,18 +22,18 @@ func DBPath() string {
 }
 
 func sqliteDSN(path string) string {
-	const timeout = "_busy_timeout="
+	opts := fmt.Sprintf("_busy_timeout=%d&_foreign_keys=on", busyTimeoutMS)
 
 	if strings.HasPrefix(path, "file:") {
 		if strings.Contains(path, "?") {
-			return path + "&" + timeout + fmt.Sprint(busyTimeoutMS)
+			return path + "&" + opts
 		}
-		return path + "?" + timeout + fmt.Sprint(busyTimeoutMS)
+		return path + "?" + opts
 	}
 	if strings.Contains(path, "?") {
-		return "file:" + path + "&" + timeout + fmt.Sprint(busyTimeoutMS)
+		return "file:" + path + "&" + opts
 	}
-	return "file:" + path + "?" + timeout + fmt.Sprint(busyTimeoutMS)
+	return "file:" + path + "?" + opts
 }
 
 func InitDB(path string) (*sql.DB, error) {
@@ -50,30 +50,7 @@ func InitDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	_, err = db.Exec(`
-        CREATE TABLE IF NOT EXISTS fridge (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            quantity NUMBER NOT NULL,
-            expiration_date DATETIME,
-            last_changed DATETIME DEFAULT CURRENT_TIMESTAMP
-    );`)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-
-	createTriggerSQL := `
-    CREATE TRIGGER IF NOT EXISTS update_last_changed
-    AFTER UPDATE ON fridge
-    FOR EACH ROW
-    BEGIN
-        UPDATE fridge SET last_changed = CURRENT_TIMESTAMP WHERE id = OLD.id;
-    END;
-    `
-
-	_, err = db.Exec(createTriggerSQL)
-	if err != nil {
+	if err := Migrate(db); err != nil {
 		db.Close()
 		return nil, err
 	}
