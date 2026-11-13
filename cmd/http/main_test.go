@@ -544,29 +544,54 @@ func TestAdminGrantingInviteSignsUpAdmin(t *testing.T) {
 }
 
 func TestClientIPTrustProxy(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/login", nil)
-	req.RemoteAddr = "10.0.0.8:1234"
-	req.Header.Set("X-Real-IP", "203.0.113.10")
-	req.Header.Set("X-Forwarded-For", "198.51.100.2, 10.0.0.1")
+	newReq := func(remote string) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/login", nil)
+		req.RemoteAddr = remote
+		req.Header.Set("X-Real-IP", "203.0.113.10")
+		req.Header.Set("X-Forwarded-For", "198.51.100.2, 10.0.0.1")
+		return req
+	}
 
 	t.Setenv("TRUST_PROXY", "")
-	if got := clientIP(req); got != "10.0.0.8" {
-		t.Fatalf("without TRUST_PROXY clientIP = %q, want 10.0.0.8", got)
+	req := newReq("127.0.0.1:1234")
+	if got := clientIP(req); got != "127.0.0.1" {
+		t.Fatalf("TRUST_PROXY unset clientIP = %q, want 127.0.0.1 (headers ignored)", got)
 	}
 
 	t.Setenv("TRUST_PROXY", "1")
-	if got := clientIP(req); got != "203.0.113.10" {
-		t.Fatalf("TRUST_PROXY with X-Real-IP clientIP = %q, want 203.0.113.10", got)
+	if got := clientIP(newReq("10.0.0.8:1234")); got != "10.0.0.8" {
+		t.Fatalf("non-loopback peer clientIP = %q, want 10.0.0.8 (spoofed X-Real-IP ignored)", got)
+	}
+	if got := clientIP(newReq("127.0.0.1:1234")); got != "203.0.113.10" {
+		t.Fatalf("loopback peer clientIP = %q, want X-Real-IP 203.0.113.10", got)
+	}
+	if got := clientIP(newReq("[::1]:1234")); got != "203.0.113.10" {
+		t.Fatalf("IPv6 loopback peer clientIP = %q, want X-Real-IP 203.0.113.10", got)
 	}
 
+	req = newReq("127.0.0.1:1234")
 	req.Header.Del("X-Real-IP")
-	if got := clientIP(req); got != "198.51.100.2" {
-		t.Fatalf("TRUST_PROXY with X-Forwarded-For clientIP = %q, want 198.51.100.2", got)
+	if got := clientIP(req); got != "127.0.0.1" {
+		t.Fatalf("loopback peer without X-Real-IP clientIP = %q, want 127.0.0.1 (leading XFF ignored)", got)
+	}
+}
+
+func TestListenAddr(t *testing.T) {
+	t.Setenv("FRIDGE_ADDR", "")
+	t.Setenv("PORT", "")
+	if got := listenAddr(); got != "127.0.0.1:8080" {
+		t.Fatalf("default listenAddr = %q, want 127.0.0.1:8080", got)
 	}
 
-	req.Header.Del("X-Forwarded-For")
-	if got := clientIP(req); got != "10.0.0.8" {
-		t.Fatalf("TRUST_PROXY with no headers clientIP = %q, want 10.0.0.8", got)
+	t.Setenv("PORT", "3000")
+	if got := listenAddr(); got != "127.0.0.1:3000" {
+		t.Fatalf("PORT listenAddr = %q, want 127.0.0.1:3000", got)
+	}
+
+	t.Setenv("FRIDGE_ADDR", "0.0.0.0:9090")
+	t.Setenv("PORT", "3000")
+	if got := listenAddr(); got != "0.0.0.0:9090" {
+		t.Fatalf("FRIDGE_ADDR overrides PORT, listenAddr = %q, want 0.0.0.0:9090", got)
 	}
 }
 

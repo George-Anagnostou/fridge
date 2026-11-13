@@ -283,18 +283,23 @@ func trustProxyFromEnv() bool {
 }
 
 func clientIP(r *http.Request) string {
-	if trustProxyFromEnv() {
+	peer := stripHostPort(r.RemoteAddr)
+	// nginx overwrites X-Real-IP with $remote_addr. X-Forwarded-For is
+	// appended, so a leading entry is client-controlled and is ignored.
+	if trustProxyFromEnv() && isLoopback(peer) {
 		if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
 			return stripHostPort(ip)
 		}
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			first := strings.TrimSpace(strings.Split(xff, ",")[0])
-			if first != "" {
-				return stripHostPort(first)
-			}
-		}
 	}
-	return stripHostPort(r.RemoteAddr)
+	return peer
+}
+
+func isLoopback(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host == "localhost"
+	}
+	return ip.IsLoopback()
 }
 
 func stripHostPort(addr string) string {

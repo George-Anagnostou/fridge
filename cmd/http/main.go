@@ -81,13 +81,19 @@ func newMux(db *sql.DB) http.Handler {
 	return mux
 }
 
+// listenAddr is 127.0.0.1:8080 by default so the process is not reachable
+// around nginx. FRIDGE_ADDR, if set, is the full listen address. PORT still
+// changes the port, but keeps the loopback host.
 func listenAddr() string {
-	port := os.Getenv("PORT")
+	if addr := strings.TrimSpace(os.Getenv("FRIDGE_ADDR")); addr != "" {
+		return addr
+	}
+	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
 		port = "8080"
 	}
 	port = strings.TrimPrefix(port, ":")
-	return ":" + port
+	return "127.0.0.1:" + port
 }
 
 func main() {
