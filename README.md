@@ -6,7 +6,7 @@ invites. (Inviting someone to share a fridge is a separate feature.)
 
 ## Run locally
 
-The HTTP server reads `FRIDGE_DB` (default `./fridge.db`) and `PORT` (default `8080`). Templates are embedded in the binary, so you can start it from any directory.
+The HTTP server reads `FRIDGE_DB` (default `./fridge.db`) and listens on `FRIDGE_ADDR` (default `127.0.0.1:8080`) so it is not reachable around nginx. `PORT` still sets the port on loopback (for example `PORT=3000` listens on `127.0.0.1:3000`). To bind all interfaces, set `FRIDGE_ADDR=:8080` or `FRIDGE_ADDR=0.0.0.0:8080`. Templates are embedded in the binary, so you can start it from any directory.
 
 ```sh
 go run ./cmd/http
@@ -20,10 +20,10 @@ go build -o fridge-server ./cmd/http
 ```
 
 ```sh
-FRIDGE_DB=/tmp/fridge.db PORT=3000 ./fridge-server
+FRIDGE_DB=/tmp/fridge.db FRIDGE_ADDR=127.0.0.1:3000 ./fridge-server
 ```
 
-Then open http://localhost:8080 (or the port you set). You will be redirected to
+Then open http://127.0.0.1:8080 (or the address you set). You will be redirected to
 log in.
 
 ### First admin
@@ -49,9 +49,11 @@ when `COOKIE_SECURE=1` (or `true` / `yes`) is set, which is what you want
 behind HTTPS. Leave it unset for local `http://localhost` development.
 
 Login attempts are rate-limited in SQLite (10 tries per 10 minutes per IP).
-The server uses the connection address by default. Behind nginx, set
-`TRUST_PROXY=1` so it uses `X-Real-IP` (falling back to the first
-`X-Forwarded-For` entry).
+The server uses the connection address by default. Behind nginx, listen on
+loopback and set `TRUST_PROXY=1` so a loopback peer's `X-Real-IP` is used
+(nginx overwrites that header). `X-Forwarded-For` is not trusted: its first
+entry is client-controlled. Headers are ignored unless the direct peer is
+loopback.
 
 The local CLI talks to the database directly and does not log in. The remote
 CLI is not yet updated for authentication, so its HTTP calls will be rejected
