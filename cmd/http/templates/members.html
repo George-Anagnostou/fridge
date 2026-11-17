@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Members — {{.Store.Name}}</title>
+</head>
+<body>
+    <p><a href="/stores/{{.Store.ID}}">Back to {{.Store.Name}}</a></p>
+    <h1>Members</h1>
+    {{if .Error}}<p>{{.Error}}</p>{{end}}
+    {{if .Shared}}<p>Added {{.Shared}} as a member.</p>{{end}}
+    {{if .InviteURL}}
+    <p>No account exists for that email yet. Share this invite link (expires {{.Expires}}):</p>
+    <p><a href="{{.InviteURL}}">{{.InviteURL}}</a></p>
+    {{end}}
+
+    <h2>Share by email</h2>
+    <form action="/stores/{{.Store.ID}}/members" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" required>
+        <label for="permission">Permission:</label>
+        <select id="permission" name="permission">
+            <option value="view">view</option>
+            <option value="edit">edit</option>
+        </select>
+        <button type="submit">Share</button>
+    </form>
+
+    <h2>Current members</h2>
+    <ul>
+    {{range .Members}}
+        <li>
+            {{.Email}} ({{.Permission}})
+            <form action="/stores/{{$.Store.ID}}/members/update" method="POST" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input type="hidden" name="user_id" value="{{.UserID}}">
+                <select name="permission">
+                    <option value="view" {{if eq .Permission "view"}}selected{{end}}>view</option>
+                    <option value="edit" {{if eq .Permission "edit"}}selected{{end}}>edit</option>
+                </select>
+                <button type="submit">Update</button>
+            </form>
+            <form action="/stores/{{$.Store.ID}}/members/remove" method="POST" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input type="hidden" name="user_id" value="{{.UserID}}">
+                <button type="submit">Remove</button>
+            </form>
+        </li>
+    {{else}}
+        <li>No members yet. The owner always has full access.</li>
+    {{end}}
+    </ul>
+</body>
+</html>

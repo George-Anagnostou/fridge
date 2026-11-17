@@ -61,9 +61,9 @@ func indentedString(item Item, indent string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (f *Fridge) AddItem(db *sql.DB, name string, quantity float64, expiration time.Time) (int, error) {
-	insertSQL := "INSERT INTO fridge (name, quantity, expiration_date) VALUES (?, ?, ?)"
-	result, err := db.Exec(insertSQL, name, quantity, expiration.Format("2006-01-02"))
+func (f *Fridge) AddItem(db *sql.DB, storeID int64, name string, quantity float64, expiration time.Time) (int, error) {
+	insertSQL := "INSERT INTO fridge (store_id, name, quantity, expiration_date) VALUES (?, ?, ?, ?)"
+	result, err := db.Exec(insertSQL, storeID, name, quantity, expiration.Format("2006-01-02"))
 	if err != nil {
 		return 0, err
 	}
@@ -76,8 +76,8 @@ func (f *Fridge) AddItem(db *sql.DB, name string, quantity float64, expiration t
 	return int(id), nil
 }
 
-func (f *Fridge) ListItems(db *sql.DB) ([]Item, error) {
-	rows, err := db.Query("SELECT id, name, quantity, expiration_date, last_changed FROM fridge")
+func (f *Fridge) ListItems(db *sql.DB, storeID int64) ([]Item, error) {
+	rows, err := db.Query("SELECT id, name, quantity, expiration_date, last_changed FROM fridge WHERE store_id = ?", storeID)
 	if err != nil {
 		return nil, err
 	}
@@ -96,11 +96,14 @@ func (f *Fridge) ListItems(db *sql.DB) ([]Item, error) {
 	return items, nil
 }
 
-func (f *Fridge) GetItemByID(db *sql.DB, id int) (Item, error) {
-	row := db.QueryRow("SELECT id, name, quantity, expiration_date, last_changed FROM fridge WHERE id = ?", id)
+func (f *Fridge) GetItemByID(db *sql.DB, storeID int64, id int) (Item, error) {
+	row := db.QueryRow("SELECT id, name, quantity, expiration_date, last_changed FROM fridge WHERE store_id = ? AND id = ?", storeID, id)
 
 	var item Item
 	err := row.Scan(&item.ID, &item.Name, &item.Quantity, &item.ExpirationDate, &item.LastChanged)
+	if errors.Is(err, sql.ErrNoRows) {
+		return item, ErrItemNotFound
+	}
 	if err != nil {
 		return item, err
 	}
@@ -108,11 +111,17 @@ func (f *Fridge) GetItemByID(db *sql.DB, id int) (Item, error) {
 	return item, nil
 }
 
-func (f *Fridge) RemoveItem(db *sql.DB, id int) error {
-	deleteSQL := "DELETE FROM fridge WHERE id = ?"
-	_, err := db.Exec(deleteSQL, id)
+func (f *Fridge) RemoveItem(db *sql.DB, storeID int64, id int) error {
+	res, err := db.Exec("DELETE FROM fridge WHERE store_id = ? AND id = ?", storeID, id)
 	if err != nil {
 		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrItemNotFound
 	}
 	return nil
 }

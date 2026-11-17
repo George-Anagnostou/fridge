@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Store.Name}} — Fridge Manager</title>
+</head>
+<body>
+    <p><a href="/">All stores</a></p>
+    <h1>{{.Store.Name}}</h1>
+    {{if .Email}}
+    <p>
+        Signed in as {{.Email}}
+        {{if .IsAdmin}} · <a href="/admin/invites">Sign-up invites</a>{{end}}
+        {{if .IsOwner}} · <a href="/stores/{{.Store.ID}}/members">Members</a>{{end}}
+        <form action="/logout" method="POST" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+            <button type="submit">Log out</button>
+        </form>
+    </p>
+    {{end}}
+
+    {{if .Error}}<p>{{.Error}}</p>{{end}}
+
+    {{if .IsOwner}}
+    <form action="/stores/{{.Store.ID}}/rename" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <label for="rename">Rename:</label>
+        <input type="text" id="rename" name="name" value="{{.Store.Name}}" required>
+        <button type="submit">Save name</button>
+    </form>
+    <form action="/stores/{{.Store.ID}}/delete" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <button type="submit">Delete store</button>
+    </form>
+    {{end}}
+
+    {{if .CanEdit}}
+    <form action="/stores/{{.Store.ID}}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <label for="name">Item Name:</label>
+        <input type="text" id="name" name="name" required>
+        <br>
+        <label for="quantity">Quantity:</label>
+        <input type="number" id="quantity" name="quantity" min="1" required>
+        <br>
+        <label for="expiration">Expiration Date (yyyy-mm-dd):</label>
+        <input type="date" id="expiration" name="expiration" required>
+        <br>
+        <button type="submit">Add Item</button>
+    </form>
+    {{end}}
+
+    <h2>Items</h2>
+    <ol>
+    {{range .Items}}
+        <li>
+            {{.Name}} - Quantity: {{.Quantity}} - Expires on {{.ExpirationDate}}
+            {{if $.CanEdit}}
+            <form action="/stores/{{$.Store.ID}}/items/remove" method="POST" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input type="hidden" name="id" value="{{.ID}}">
+                <button type="submit">Remove</button>
+            </form>
+            {{end}}
+        </li>
+    {{else}}
+        <li>No items in this store.</li>
+    {{end}}
+    </ol>
+</body>
+</html>

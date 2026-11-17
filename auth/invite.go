@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/George-Anagnostou/fridge/fridge"
 )
 
 const DefaultInviteTTL = 7 * 24 * time.Hour
@@ -16,9 +18,11 @@ var (
 
 // InviteSpec describes a new sign-up invite.
 type InviteSpec struct {
-	TTL         time.Duration
-	CreatedBy   *int64 // optional; nil for a locally bootstrapped invite
-	GrantsAdmin bool
+	TTL             time.Duration
+	CreatedBy       *int64 // optional; nil for a locally bootstrapped invite
+	GrantsAdmin     bool
+	StoreID         *int64 // optional; set when a store owner shares with a new email
+	StorePermission string // "view" or "edit" when StoreID is set
 }
 
 func CreateInvite(db *sql.DB, ttl time.Duration) (plainToken string, expiresAt time.Time, err error) {
@@ -43,9 +47,18 @@ func CreateInviteSpec(db *sql.DB, spec InviteSpec) (plainToken string, expiresAt
 	if spec.GrantsAdmin {
 		grantsAdmin = 1
 	}
+	var storeID any
+	var storePerm any
+	if spec.StoreID != nil {
+		if !fridge.ValidPermission(spec.StorePermission) {
+			return "", time.Time{}, fridge.ErrInvalidPermission
+		}
+		storeID = *spec.StoreID
+		storePerm = spec.StorePermission
+	}
 	_, err = db.Exec(
-		`INSERT INTO invites (token_hash, expires_at, created_by, grants_admin) VALUES (?, ?, ?, ?)`,
-		HashToken(plainToken), expiresAt.Format(time.RFC3339), createdBy, grantsAdmin,
+		`INSERT INTO invites (token_hash, expires_at, created_by, grants_admin, store_id, store_permission) VALUES (?, ?, ?, ?, ?, ?)`,
+		HashToken(plainToken), expiresAt.Format(time.RFC3339), createdBy, grantsAdmin, storeID, storePerm,
 	)
 	if err != nil {
 		return "", time.Time{}, err
@@ -123,10 +136,12 @@ func RegisterWithInvite(db *sql.DB, email, password, inviteToken string) (User, 
 	var expires string
 	var usedAt sql.NullString
 	var grantsAdmin int
+	var storeID sql.NullInt64
+	var storePerm sql.NullString
 	err = tx.QueryRow(
-		`SELECT expires_at, used_at, grants_admin FROM invites WHERE token_hash = ?`,
+		`SELECT expires_at, used_at, grants_admin, store_id, store_permission FROM invites WHERE token_hash = ?`,
 		HashToken(inviteToken),
-	).Scan(&expires, &usedAt, &grantsAdmin)
+	).Scan(&expires, &usedAt, &grantsAdmin, &storeID, &storePerm)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrInviteNotFound
 	}
@@ -154,6 +169,23 @@ func RegisterWithInvite(db *sql.DB, email, password, inviteToken string) (User, 
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
+		return User{}, err
+	}
+
+	if storeID.Valid {
+		perm := storePerm.String
+		if !fridge.ValidPermission(perm) {
+			return User{}, fridge.ErrInvalidPermission
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO store_members (store_id, user_id, permission) VALUES (?, ?, ?)`,
+			storeID.Int64, id, perm,
+		); err != nil {
+			return User{}, err
+		}
+	}
+
+	if err := fridge.ClaimOrphanItemsTx(tx, id); err != nil {
 		return User{}, err
 	}
 

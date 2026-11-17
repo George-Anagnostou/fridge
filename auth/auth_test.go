@@ -274,3 +274,52 @@ func TestInviteCreatedBy(t *testing.T) {
 		t.Fatalf("created_by = %v, want %d", createdBy, id)
 	}
 }
+
+func TestRegisterWithStoreInvite(t *testing.T) {
+	db := setupDB(t)
+	owner, err := CreateUser(db, "owner@example.com", "password123")
+	if err != nil {
+		t.Fatalf("CreateUser owner: %v", err)
+	}
+	store, err := fridge.CreateStore(db, owner.ID, "Shared")
+	if err != nil {
+		t.Fatalf("CreateStore: %v", err)
+	}
+
+	token, _, err := CreateInviteSpec(db, InviteSpec{
+		TTL:             time.Hour,
+		CreatedBy:       &owner.ID,
+		StoreID:         &store.ID,
+		StorePermission: fridge.PermView,
+	})
+	if err != nil {
+		t.Fatalf("CreateInviteSpec: %v", err)
+	}
+	u, err := RegisterWithInvite(db, "member@example.com", "password123", token)
+	if err != nil {
+		t.Fatalf("RegisterWithInvite: %v", err)
+	}
+	access, err := fridge.StoreAccess(db, store.ID, u.ID)
+	if err != nil {
+		t.Fatalf("StoreAccess: %v", err)
+	}
+	if access.Owner || access.Perm != fridge.PermView {
+		t.Fatalf("access = %+v, want view member", access)
+	}
+	if _, err := RegisterWithInvite(db, "other@example.com", "password123", token); !errors.Is(err, ErrInviteUsed) {
+		t.Fatalf("reused store invite = %v, want ErrInviteUsed", err)
+	}
+
+	// A plain admin-style invite still works and does not add membership.
+	plain, _, err := CreateInvite(db, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	plainUser, err := RegisterWithInvite(db, "solo@example.com", "password123", plain)
+	if err != nil {
+		t.Fatalf("RegisterWithInvite plain: %v", err)
+	}
+	if _, err := fridge.StoreAccess(db, store.ID, plainUser.ID); !errors.Is(err, fridge.ErrStoreNotFound) {
+		t.Fatalf("plain invite granted store access: %v", err)
+	}
+}

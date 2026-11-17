@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+
+	"github.com/George-Anagnostou/fridge/fridge"
 )
 
 var (
@@ -61,6 +63,9 @@ func CreateUser(db *sql.DB, email, password string) (User, error) {
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
+		return User{}, err
+	}
+	if err := fridge.ClaimOrphanItems(db, id); err != nil {
 		return User{}, err
 	}
 	return User{ID: id, Email: email}, nil

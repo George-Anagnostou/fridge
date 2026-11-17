@@ -31,11 +31,29 @@ func date(t *testing.T, s string) time.Time {
 	return parsed
 }
 
+func seedUserAndStore(t *testing.T, db *sql.DB) (userID, storeID int64) {
+	t.Helper()
+	res, err := db.Exec(`INSERT INTO users (email, password_hash) VALUES (?, ?)`, "owner@example.com", "x")
+	if err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	userID, err = res.LastInsertId()
+	if err != nil {
+		t.Fatalf("user id: %v", err)
+	}
+	store, err := CreateStore(db, userID, "Test store")
+	if err != nil {
+		t.Fatalf("CreateStore: %v", err)
+	}
+	return userID, store.ID
+}
+
 func TestListItemsEmpty(t *testing.T) {
 	db := openTempDB(t)
+	_, storeID := seedUserAndStore(t, db)
 	f := &Fridge{}
 
-	items, err := f.ListItems(db)
+	items, err := f.ListItems(db, storeID)
 	if err != nil {
 		t.Fatalf("ListItems: %v", err)
 	}
@@ -62,10 +80,11 @@ func TestItemCRUD(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			db := openTempDB(t)
+			_, storeID := seedUserAndStore(t, db)
 			f := &Fridge{}
 			exp := date(t, tc.exp)
 
-			id, err := f.AddItem(db, tc.itemName, tc.qty, exp)
+			id, err := f.AddItem(db, storeID, tc.itemName, tc.qty, exp)
 			if err != nil {
 				t.Fatalf("AddItem: %v", err)
 			}
@@ -73,7 +92,7 @@ func TestItemCRUD(t *testing.T) {
 				t.Fatal("AddItem returned id 0")
 			}
 
-			got, err := f.GetItemByID(db, id)
+			got, err := f.GetItemByID(db, storeID, id)
 			if err != nil {
 				t.Fatalf("GetItemByID: %v", err)
 			}
@@ -87,7 +106,7 @@ func TestItemCRUD(t *testing.T) {
 				t.Errorf("ExpirationDate = %v, want %s", got.ExpirationDate, tc.exp)
 			}
 
-			items, err := f.ListItems(db)
+			items, err := f.ListItems(db, storeID)
 			if err != nil {
 				t.Fatalf("ListItems: %v", err)
 			}
@@ -98,11 +117,11 @@ func TestItemCRUD(t *testing.T) {
 				t.Errorf("ListItems[0].ID = %d, want %d", items[0].ID, id)
 			}
 
-			if err := f.RemoveItem(db, id); err != nil {
+			if err := f.RemoveItem(db, storeID, id); err != nil {
 				t.Fatalf("RemoveItem: %v", err)
 			}
 
-			items, err = f.ListItems(db)
+			items, err = f.ListItems(db, storeID)
 			if err != nil {
 				t.Fatalf("ListItems after remove: %v", err)
 			}
@@ -113,7 +132,7 @@ func TestItemCRUD(t *testing.T) {
 				t.Fatalf("ListItems after remove len = %d, want 0", len(items))
 			}
 
-			if _, err := f.GetItemByID(db, id); err == nil {
+			if _, err := f.GetItemByID(db, storeID, id); err == nil {
 				t.Fatal("GetItemByID after remove: want error, got nil")
 			}
 		})
@@ -122,19 +141,20 @@ func TestItemCRUD(t *testing.T) {
 
 func TestListItemsMultiple(t *testing.T) {
 	db := openTempDB(t)
+	_, storeID := seedUserAndStore(t, db)
 	f := &Fridge{}
 
 	want := []string{"Milk", "Eggs", "Butter"}
 	ids := make([]int, 0, len(want))
 	for _, name := range want {
-		id, err := f.AddItem(db, name, 1, date(t, "2026-12-01"))
+		id, err := f.AddItem(db, storeID, name, 1, date(t, "2026-12-01"))
 		if err != nil {
 			t.Fatalf("AddItem(%q): %v", name, err)
 		}
 		ids = append(ids, id)
 	}
 
-	items, err := f.ListItems(db)
+	items, err := f.ListItems(db, storeID)
 	if err != nil {
 		t.Fatalf("ListItems: %v", err)
 	}
@@ -157,10 +177,10 @@ func TestListItemsMultiple(t *testing.T) {
 		}
 	}
 
-	if err := f.RemoveItem(db, ids[1]); err != nil {
+	if err := f.RemoveItem(db, storeID, ids[1]); err != nil {
 		t.Fatalf("RemoveItem: %v", err)
 	}
-	items, err = f.ListItems(db)
+	items, err = f.ListItems(db, storeID)
 	if err != nil {
 		t.Fatalf("ListItems after remove: %v", err)
 	}

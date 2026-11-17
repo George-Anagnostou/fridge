@@ -18,35 +18,26 @@
     </p>
     {{end}}
 
-    <form action="/" method="POST">
-        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-        <label for="name">Item Name:</label>
-        <input type="text" id="name" name="name" required>
-        <br>
-        <label for="quantity">Quantity:</label>
-        <input type="number" id="quantity" name="quantity" min="1" required>
-        <br>
-        <label for="expiration">Expiration Date (yyyy-mm-dd):</label>
-        <input type="date" id="expiration" name="expiration" required>
-        <br>
-        <button type="submit">Add Item</button>
-    </form>
+    {{if .Error}}<p>{{.Error}}</p>{{end}}
 
-    <h2>Items in the Fridge</h2>
-
-    <ol>
-    {{range .Items}}
+    <h2>Your stores</h2>
+    <ul>
+    {{range .Stores}}
         <li>
-            {{.Name}} - Quantity: {{.Quantity}} - Expires on {{.ExpirationDate}}
-            <form action="/remove" method="POST" style="display:inline;">
-                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-                <input type="hidden" name="id" value="{{.ID}}">
-                <button type="submit">Remove</button>
-            </form>
+            <a href="/stores/{{.ID}}">{{.Name}}</a>
+            ({{.Permission}})
         </li>
     {{else}}
-        <li>No items in the fridge.</li>
+        <li>No stores yet.</li>
     {{end}}
-    </ol>
+    </ul>
+
+    <h2>Create a store</h2>
+    <form action="/stores" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <label for="name">Name:</label>
+        <input type="text" id="name" name="name" required>
+        <button type="submit">Create store</button>
+    </form>
 </body>
 </html>
