@@ -1,7 +1,10 @@
 # The Fridge
 
 A simple personal inventory app (Go + SQLite). Item pages and APIs require a
-logged-in account and are scoped to a store (`/stores/{id}`). Sign-up is
+logged-in account and are scoped to a store (`/stores/{id}`). Owners and
+edit members can add and edit items, including optional barcode, brand, and
+basic nutrition. The store page lists expired items and those expiring within
+3 days first. Buying the same item again adds a new row. Sign-up is
 invite-only; an admin can create general sign-up invites, and a store owner
 can share by email. If the address already has an account, that user is added
 as a member; otherwise the owner is shown a sign-up invite link (no email is

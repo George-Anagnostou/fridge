@@ -925,3 +925,274 @@ func TestStoreInviteCreatesAccountAndMembership(t *testing.T) {
 		t.Fatalf("reused store invite succeeded with status %d; body: %s", resp.StatusCode, bodyBytes)
 	}
 }
+
+func addItem(t *testing.T, srv *httptest.Server, client *http.Client, storeID int64, fields url.Values) int {
+	t.Helper()
+	token, _, status := getCSRF(t, client, srv.URL+storePath(storeID, ""))
+	if status != http.StatusOK {
+		t.Fatalf("GET store status = %d", status)
+	}
+	fields.Set("csrf_token", token)
+	prev := client.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := client.PostForm(srv.URL+storePath(storeID, ""), fields)
+	client.CheckRedirect = prev
+	if err != nil {
+		t.Fatalf("POST add item: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST add item status = %d, want 303; body: %s", resp.StatusCode, body)
+	}
+	_, page, status := getCSRF(t, client, srv.URL+storePath(storeID, ""))
+	if status != http.StatusOK {
+		t.Fatalf("GET store after add status = %d", status)
+	}
+	matches := regexp.MustCompile(`/items/(\d+)/edit`).FindAllStringSubmatch(page, -1)
+	if len(matches) == 0 {
+		t.Fatalf("no edit link after add; body: %s", page)
+	}
+	id, err := strconv.Atoi(matches[len(matches)-1][1])
+	if err != nil {
+		t.Fatalf("item id: %v", err)
+	}
+	return id
+}
+
+func TestEditItemPermissionsAndValidation(t *testing.T) {
+	srv, db := testServer(t)
+	owner := newClient(t, srv)
+	signup(t, srv, db, owner, "owner@example.com", "password123")
+	storeID := createStore(t, srv, owner, "Pantry")
+	itemID := addItem(t, srv, owner, storeID, url.Values{
+		"name":       {"Milk"},
+		"quantity":   {"1"},
+		"expiration": {"2026-12-01"},
+		"brand":      {"Dairy Co"},
+	})
+
+	viewUser, err := auth.CreateUser(db, "view@example.com", "password123")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	ownerRow, _, err := auth.UserByEmail(db, "owner@example.com")
+	if err != nil {
+		t.Fatalf("owner lookup: %v", err)
+	}
+	if err := fridge.AddMember(db, storeID, ownerRow.ID, viewUser.ID, fridge.PermView); err != nil {
+		t.Fatalf("AddMember: %v", err)
+	}
+	viewer := newClient(t, srv)
+	loginAs(t, srv, viewer, "view@example.com", "password123")
+
+	editURL := srv.URL + storePath(storeID, "/items/"+strconv.Itoa(itemID)+"/edit")
+	resp, err := viewer.Get(editURL)
+	if err != nil {
+		t.Fatalf("viewer GET edit: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("viewer GET edit status = %d, want 403; body: %s", resp.StatusCode, body)
+	}
+
+	token, _, status := getCSRF(t, viewer, srv.URL+storePath(storeID, ""))
+	if status != http.StatusOK {
+		t.Fatalf("viewer GET store status = %d", status)
+	}
+	resp, err = viewer.PostForm(editURL, url.Values{
+		"csrf_token": {token},
+		"name":       {"Hacked"},
+		"quantity":   {"9"},
+		"expiration": {"2026-12-01"},
+	})
+	if err != nil {
+		t.Fatalf("viewer POST edit: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("viewer POST edit status = %d, want 403; body: %s", resp.StatusCode, body)
+	}
+
+	token, formBody, status := getCSRF(t, owner, editURL)
+	if status != http.StatusOK {
+		t.Fatalf("owner GET edit status = %d; body: %s", status, formBody)
+	}
+	if !strings.Contains(formBody, "Dairy Co") {
+		t.Fatalf("edit form missing brand, got: %s", formBody)
+	}
+
+	resp, err = owner.PostForm(editURL, url.Values{
+		"csrf_token": {token},
+		"name":       {""},
+		"quantity":   {"2"},
+		"expiration": {"2026-12-10"},
+	})
+	if err != nil {
+		t.Fatalf("POST empty name: %v", err)
+	}
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty name status = %d, want 400; body: %s", resp.StatusCode, bodyBytes)
+	}
+
+	token, _, status = getCSRF(t, owner, editURL)
+	if status != http.StatusOK {
+		t.Fatalf("GET edit csrf status = %d", status)
+	}
+	resp, err = owner.PostForm(editURL, url.Values{
+		"csrf_token": {token},
+		"name":       {"Milk"},
+		"quantity":   {"-1"},
+		"expiration": {"2026-12-10"},
+	})
+	if err != nil {
+		t.Fatalf("POST bad qty: %v", err)
+	}
+	bodyBytes, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("negative qty status = %d, want 400; body: %s", resp.StatusCode, bodyBytes)
+	}
+
+	token, _, status = getCSRF(t, owner, editURL)
+	if status != http.StatusOK {
+		t.Fatalf("GET edit csrf status = %d", status)
+	}
+	resp, err = owner.PostForm(editURL, url.Values{
+		"csrf_token": {token},
+		"name":       {"Milk"},
+		"quantity":   {"1"},
+		"expiration": {"not-a-date"},
+	})
+	if err != nil {
+		t.Fatalf("POST bad date: %v", err)
+	}
+	bodyBytes, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad date status = %d, want 400; body: %s", resp.StatusCode, bodyBytes)
+	}
+
+	token, _, status = getCSRF(t, owner, editURL)
+	if status != http.StatusOK {
+		t.Fatalf("GET edit csrf status = %d", status)
+	}
+	resp, err = owner.PostForm(editURL, url.Values{
+		"csrf_token": {token},
+		"name":       {"Milk"},
+		"quantity":   {"1"},
+		"expiration": {"2026-12-10"},
+		"calories":   {"-5"},
+	})
+	if err != nil {
+		t.Fatalf("POST bad calories: %v", err)
+	}
+	bodyBytes, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("negative calories status = %d, want 400; body: %s", resp.StatusCode, bodyBytes)
+	}
+
+	token, _, status = getCSRF(t, owner, editURL)
+	if status != http.StatusOK {
+		t.Fatalf("GET edit csrf status = %d", status)
+	}
+	prev := owner.CheckRedirect
+	owner.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err = owner.PostForm(editURL, url.Values{
+		"csrf_token":   {token},
+		"name":         {"Milk 2%"},
+		"quantity":     {"2"},
+		"expiration":   {"2026-12-10"},
+		"barcode":      {"051000012345"},
+		"brand":        {"Dairy Co"},
+		"serving_size": {"1 cup"},
+		"calories":     {"80"},
+		"protein_g":    {"8"},
+		"carbs_g":      {"12"},
+		"fat_g":        {"2.5"},
+	})
+	owner.CheckRedirect = prev
+	if err != nil {
+		t.Fatalf("POST save: %v", err)
+	}
+	bodyBytes, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST save status = %d, want 303; body: %s", resp.StatusCode, bodyBytes)
+	}
+
+	resp, err = owner.Get(srv.URL + storePath(storeID, "/items/"+strconv.Itoa(itemID)))
+	if err != nil {
+		t.Fatalf("GET item JSON: %v", err)
+	}
+	bodyBytes, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET item JSON status = %d; body: %s", resp.StatusCode, bodyBytes)
+	}
+	var got fridge.Item
+	if err := json.Unmarshal(bodyBytes, &got); err != nil {
+		t.Fatalf("decode item: %v; body: %s", err, bodyBytes)
+	}
+	if got.Name != "Milk 2%" || got.Quantity != 2 || got.Barcode != "051000012345" || got.Brand != "Dairy Co" || got.ServingSize != "1 cup" {
+		t.Fatalf("updated item = %+v", got)
+	}
+	if got.Calories == nil || *got.Calories != 80 || got.FatG == nil || *got.FatG != 2.5 {
+		t.Fatalf("updated nutrition = %+v", got)
+	}
+}
+
+func TestUseSoonOrderingHTTP(t *testing.T) {
+	srv, db := testServer(t)
+	owner := newClient(t, srv)
+	signup(t, srv, db, owner, "owner@example.com", "password123")
+	storeID := createStore(t, srv, owner, "Pantry")
+
+	today := time.Now()
+	add := func(name, exp string) {
+		t.Helper()
+		addItem(t, srv, owner, storeID, url.Values{
+			"name":       {name},
+			"quantity":   {"1"},
+			"expiration": {exp},
+		})
+	}
+	add("Later", today.AddDate(0, 0, 10).Format(fridge.DateFormat))
+	add("Expired", today.AddDate(0, 0, -2).Format(fridge.DateFormat))
+	add("Soon", today.AddDate(0, 0, 1).Format(fridge.DateFormat))
+
+	_, body, status := getCSRF(t, owner, srv.URL+storePath(storeID, ""))
+	if status != http.StatusOK {
+		t.Fatalf("GET store status = %d", status)
+	}
+	useSoonAt := strings.Index(body, "<h2>Use soon</h2>")
+	itemsAt := strings.Index(body, "<h2>Items</h2>")
+	if useSoonAt < 0 || itemsAt < 0 || useSoonAt > itemsAt {
+		t.Fatalf("expected Use soon section above Items, got: %s", body)
+	}
+	section := body[useSoonAt:itemsAt]
+	expiredAt := strings.Index(section, "Expired")
+	soonAt := strings.Index(section, "Soon")
+	if expiredAt < 0 || soonAt < 0 || expiredAt > soonAt {
+		t.Fatalf("use-soon order want Expired then Soon, got: %s", section)
+	}
+	if strings.Contains(section, "Later") {
+		t.Fatalf("Later should not be in use-soon: %s", section)
+	}
+	rest := body[itemsAt:]
+	if !strings.Contains(rest, "Later") {
+		t.Fatalf("Later missing from remaining items: %s", rest)
+	}
+	if strings.Contains(rest, "Expired") || strings.Contains(rest, ">Soon<") || strings.Contains(rest, "Soon -") {
+		t.Fatalf("expired/soon should not be in remaining items: %s", rest)
+	}
+}

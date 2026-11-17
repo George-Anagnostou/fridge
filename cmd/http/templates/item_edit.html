@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit {{.Item.Name}} — Fridge Manager</title>
+</head>
+<body>
+    <p><a href="/stores/{{.Store.ID}}">Back to {{.Store.Name}}</a></p>
+    <h1>Edit item</h1>
+    {{if .Error}}<p>{{.Error}}</p>{{end}}
+    <form action="/stores/{{.Store.ID}}/items/{{.Item.ID}}/edit" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <label for="name">Item Name:</label>
+        <input type="text" id="name" name="name" value="{{.Item.Name}}" required>
+        <br>
+        <label for="quantity">Quantity:</label>
+        <input type="number" id="quantity" name="quantity" min="0" step="any" value="{{.Item.Quantity}}" required>
+        <br>
+        <label for="expiration">Expiration Date (yyyy-mm-dd):</label>
+        <input type="date" id="expiration" name="expiration" value="{{.Item.ExpirationDate}}" required>
+        <br>
+        <label for="barcode">Barcode:</label>
+        <input type="text" id="barcode" name="barcode" value="{{.Item.Barcode}}">
+        <br>
+        <label for="brand">Brand:</label>
+        <input type="text" id="brand" name="brand" value="{{.Item.Brand}}">
+        <br>
+        <label for="serving_size">Serving size:</label>
+        <input type="text" id="serving_size" name="serving_size" value="{{.Item.ServingSize}}">
+        <br>
+        <label for="calories">Calories:</label>
+        <input type="number" id="calories" name="calories" min="0" step="any" value="{{.Item.Calories}}">
+        <br>
+        <label for="protein_g">Protein (g):</label>
+        <input type="number" id="protein_g" name="protein_g" min="0" step="any" value="{{.Item.ProteinG}}">
+        <br>
+        <label for="carbs_g">Carbs (g):</label>
+        <input type="number" id="carbs_g" name="carbs_g" min="0" step="any" value="{{.Item.CarbsG}}">
+        <br>
+        <label for="fat_g">Fat (g):</label>
+        <input type="number" id="fat_g" name="fat_g" min="0" step="any" value="{{.Item.FatG}}">
+        <br>
+        <button type="submit">Save</button>
+    </form>
+</body>
+</html>

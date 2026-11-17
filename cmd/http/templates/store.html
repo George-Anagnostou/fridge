@@ -36,27 +36,53 @@
     {{end}}
 
     {{if .CanEdit}}
+    <h2>Add item</h2>
     <form action="/stores/{{.Store.ID}}" method="POST">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
         <label for="name">Item Name:</label>
         <input type="text" id="name" name="name" required>
         <br>
         <label for="quantity">Quantity:</label>
-        <input type="number" id="quantity" name="quantity" min="1" required>
+        <input type="number" id="quantity" name="quantity" min="0" step="any" required>
         <br>
         <label for="expiration">Expiration Date (yyyy-mm-dd):</label>
         <input type="date" id="expiration" name="expiration" required>
+        <br>
+        <label for="barcode">Barcode:</label>
+        <input type="text" id="barcode" name="barcode">
+        <br>
+        <label for="brand">Brand:</label>
+        <input type="text" id="brand" name="brand">
+        <br>
+        <label for="serving_size">Serving size:</label>
+        <input type="text" id="serving_size" name="serving_size">
+        <br>
+        <label for="calories">Calories:</label>
+        <input type="number" id="calories" name="calories" min="0" step="any">
+        <br>
+        <label for="protein_g">Protein (g):</label>
+        <input type="number" id="protein_g" name="protein_g" min="0" step="any">
+        <br>
+        <label for="carbs_g">Carbs (g):</label>
+        <input type="number" id="carbs_g" name="carbs_g" min="0" step="any">
+        <br>
+        <label for="fat_g">Fat (g):</label>
+        <input type="number" id="fat_g" name="fat_g" min="0" step="any">
         <br>
         <button type="submit">Add Item</button>
     </form>
     {{end}}
 
-    <h2>Items</h2>
+    <h2>Use soon</h2>
+    <p>Expired items first, then items expiring within {{.UseSoonDays}} days.</p>
     <ol>
-    {{range .Items}}
+    {{range .UseSoon}}
         <li>
-            {{.Name}} - Quantity: {{.Quantity}} - Expires on {{.ExpirationDate}}
+            {{if .Expired}}Expired: {{end}}{{.Name}} - Quantity: {{.Quantity}} - Expires on {{.ExpirationDate}}
+            {{if .Brand}} — {{.Brand}}{{end}}
+            {{if .Barcode}} ({{.Barcode}}){{end}}
             {{if $.CanEdit}}
+            <a href="/stores/{{$.Store.ID}}/items/{{.ID}}/edit">Edit</a>
             <form action="/stores/{{$.Store.ID}}/items/remove" method="POST" style="display:inline;">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <input type="hidden" name="id" value="{{.ID}}">
@@ -65,7 +91,28 @@
             {{end}}
         </li>
     {{else}}
-        <li>No items in this store.</li>
+        <li>Nothing to use soon.</li>
+    {{end}}
+    </ol>
+
+    <h2>Items</h2>
+    <ol>
+    {{range .Items}}
+        <li>
+            {{.Name}} - Quantity: {{.Quantity}} - Expires on {{.ExpirationDate}}
+            {{if .Brand}} — {{.Brand}}{{end}}
+            {{if .Barcode}} ({{.Barcode}}){{end}}
+            {{if $.CanEdit}}
+            <a href="/stores/{{$.Store.ID}}/items/{{.ID}}/edit">Edit</a>
+            <form action="/stores/{{$.Store.ID}}/items/remove" method="POST" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input type="hidden" name="id" value="{{.ID}}">
+                <button type="submit">Remove</button>
+            </form>
+            {{end}}
+        </li>
+    {{else}}
+        <li>No other items in this store.</li>
     {{end}}
     </ol>
 </body>

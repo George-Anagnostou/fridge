@@ -27,6 +27,13 @@ type Item struct {
 	Quantity       float64   `json:"quantity"`
 	ExpirationDate time.Time `json:"expiration_date"`
 	LastChanged    time.Time `json:"last_changed"`
+	Barcode        string    `json:"barcode,omitempty"`
+	Brand          string    `json:"brand,omitempty"`
+	ServingSize    string    `json:"serving_size,omitempty"`
+	Calories       *float64  `json:"calories,omitempty"`
+	ProteinG       *float64  `json:"protein_g,omitempty"`
+	CarbsG         *float64  `json:"carbs_g,omitempty"`
+	FatG           *float64  `json:"fat_g,omitempty"`
 }
 
 func (i Item) String() string {
@@ -62,22 +69,11 @@ func indentedString(item Item, indent string) string {
 }
 
 func (f *Fridge) AddItem(db *sql.DB, storeID int64, name string, quantity float64, expiration time.Time) (int, error) {
-	insertSQL := "INSERT INTO fridge (store_id, name, quantity, expiration_date) VALUES (?, ?, ?, ?)"
-	result, err := db.Exec(insertSQL, storeID, name, quantity, expiration.Format("2006-01-02"))
-	if err != nil {
-		return 0, err
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return 0, err
-	}
-
-	return int(id), nil
+	return f.AddItemFull(db, storeID, Item{Name: name, Quantity: quantity, ExpirationDate: expiration})
 }
 
 func (f *Fridge) ListItems(db *sql.DB, storeID int64) ([]Item, error) {
-	rows, err := db.Query("SELECT id, name, quantity, expiration_date, last_changed FROM fridge WHERE store_id = ?", storeID)
+	rows, err := db.Query("SELECT "+itemColumns+" FROM fridge WHERE store_id = ? ORDER BY expiration_date ASC, id ASC", storeID)
 	if err != nil {
 		return nil, err
 	}
@@ -85,29 +81,23 @@ func (f *Fridge) ListItems(db *sql.DB, storeID int64) ([]Item, error) {
 
 	items := []Item{}
 	for rows.Next() {
-		var item Item
-		err := rows.Scan(&item.ID, &item.Name, &item.Quantity, &item.ExpirationDate, &item.LastChanged)
+		item, err := scanItem(rows.Scan)
 		if err != nil {
 			return nil, err
 		}
-
 		items = append(items, item)
 	}
-	return items, nil
+	return items, rows.Err()
 }
 
 func (f *Fridge) GetItemByID(db *sql.DB, storeID int64, id int) (Item, error) {
-	row := db.QueryRow("SELECT id, name, quantity, expiration_date, last_changed FROM fridge WHERE store_id = ? AND id = ?", storeID, id)
-
-	var item Item
-	err := row.Scan(&item.ID, &item.Name, &item.Quantity, &item.ExpirationDate, &item.LastChanged)
+	item, err := scanItem(db.QueryRow("SELECT "+itemColumns+" FROM fridge WHERE store_id = ? AND id = ?", storeID, id).Scan)
 	if errors.Is(err, sql.ErrNoRows) {
-		return item, ErrItemNotFound
+		return Item{}, ErrItemNotFound
 	}
 	if err != nil {
-		return item, err
+		return Item{}, err
 	}
-
 	return item, nil
 }
 

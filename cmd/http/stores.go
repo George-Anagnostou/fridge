@@ -23,14 +23,16 @@ type storesPage struct {
 }
 
 type storePage struct {
-	CSRF    string
-	Email   string
-	IsAdmin bool
-	Store   fridge.Store
-	CanEdit bool
-	IsOwner bool
-	Items   []RenderItem
-	Error   string
+	CSRF        string
+	Email       string
+	IsAdmin     bool
+	Store       fridge.Store
+	CanEdit     bool
+	IsOwner     bool
+	UseSoon     []RenderItem
+	Items       []RenderItem
+	UseSoonDays int
+	Error       string
 }
 
 type membersPage struct {
@@ -133,26 +135,13 @@ func (s *server) storePageHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := s.addItemFromForm(r, access.Store.ID); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			s.renderStore(w, r, u, access, "Could not add that item.")
+			s.renderStore(w, r, u, access, itemErrorMessage(err))
 			return
 		}
 		http.Redirect(w, r, "/stores/"+strconv.FormatInt(access.Store.ID, 10), http.StatusSeeOther)
 		return
 	}
 	s.renderStore(w, r, u, access, "")
-}
-
-func (s *server) addItemFromForm(r *http.Request, storeID int64) error {
-	qty, err := strconv.ParseFloat(r.FormValue("quantity"), 64)
-	if err != nil {
-		return err
-	}
-	expirationDate, err := time.Parse(fridge.DateFormat, r.FormValue("expiration"))
-	if err != nil {
-		return err
-	}
-	_, err = s.fridge.AddItem(s.db, storeID, r.FormValue("name"), qty, expirationDate)
-	return err
 }
 
 func (s *server) renderStore(w http.ResponseWriter, r *http.Request, u auth.User, access fridge.Access, errMsg string) {
@@ -162,15 +151,18 @@ func (s *server) renderStore(w http.ResponseWriter, r *http.Request, u auth.User
 		log.Println("list items:", err)
 		return
 	}
+	useSoon, rest := fridge.PartitionUseSoon(items, time.Now())
 	if err := s.tmpl.ExecuteTemplate(w, "store.html", storePage{
-		CSRF:    s.csrfToken(r),
-		Email:   u.Email,
-		IsAdmin: u.IsAdmin,
-		Store:   access.Store,
-		CanEdit: access.CanEdit(),
-		IsOwner: access.Owner,
-		Items:   toRenderItems(items),
-		Error:   errMsg,
+		CSRF:        s.csrfToken(r),
+		Email:       u.Email,
+		IsAdmin:     u.IsAdmin,
+		Store:       access.Store,
+		CanEdit:     access.CanEdit(),
+		IsOwner:     access.Owner,
+		UseSoon:     toRenderItems(useSoon),
+		Items:       toRenderItems(rest),
+		UseSoonDays: fridge.UseSoonDays,
+		Error:       errMsg,
 	}); err != nil {
 		http.Error(w, "Unable to render template", http.StatusInternalServerError)
 		log.Println("Error rendering template:", err)
@@ -269,7 +261,12 @@ func (s *server) postStoreItemsAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON data", http.StatusBadRequest)
 		return
 	}
-	if _, err := s.fridge.AddItem(s.db, access.Store.ID, item.Name, item.Quantity, item.ExpirationDate); err != nil {
+	if _, err := s.fridge.AddItemFull(s.db, access.Store.ID, item); err != nil {
+		if errors.Is(err, fridge.ErrInvalidItemName) || errors.Is(err, fridge.ErrInvalidQuantity) ||
+			errors.Is(err, fridge.ErrInvalidExpiration) || errors.Is(err, fridge.ErrInvalidNutrition) {
+			http.Error(w, itemErrorMessage(err), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, "Error adding item", http.StatusInternalServerError)
 		log.Println("add item:", err)
 		return
