@@ -1655,3 +1655,71 @@ func TestLookupSkipsUSDAWithoutKey(t *testing.T) {
 		t.Fatalf("USDA hits = %d, want 0", usdaHits.Load())
 	}
 }
+
+func TestStorePrefillFromTypedBarcode(t *testing.T) {
+	srv, db := testServer(t)
+	client := newClient(t, srv)
+	signup(t, srv, db, client, "user@example.com", "password123")
+	storeID := createStore(t, srv, client, "Home")
+
+	cache := lookup.NewCache(db)
+	src := lookupTestSource{res: lookup.Result{Found: true, Product: lookup.Product{
+		Name:        "Scanned Milk",
+		Brand:       "Dairy Co",
+		ServingSize: "1 cup",
+		Calories:    floatPtr(150),
+	}}}
+	if _, err := cache.GetOrFetch(context.Background(), "1234-5678", lookup.SourceOFF, src); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	resp, err := client.Get(srv.URL + storePath(storeID, "") + "?barcode=1234-5678")
+	if err != nil {
+		t.Fatalf("GET store?barcode=: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", resp.StatusCode, body)
+	}
+	html := string(body)
+	for _, want := range []string{
+		`id="barcode" name="barcode" value="12345678"`,
+		`id="name" name="name" value="Scanned Milk"`,
+		`id="brand" name="brand" value="Dairy Co"`,
+		`id="serving_size" name="serving_size" value="1 cup"`,
+		`id="calories" name="calories" min="0" step="any" value="150"`,
+		"Found Scanned Milk.",
+		"<details open>",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("store prefill missing %q", want)
+		}
+	}
+}
+
+func TestStaticScanAssetsServed(t *testing.T) {
+	srv, _ := testServer(t)
+	client := newClient(t, srv)
+	for _, path := range []string{
+		"/static/scan.js",
+		"/static/vendor/html5-qrcode/html5-qrcode.min.js",
+		"/static/vendor/html5-qrcode/LICENSE",
+		"/static/vendor/html5-qrcode/VERSION",
+	} {
+		resp, err := client.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s status = %d", path, resp.StatusCode)
+		}
+		if len(body) == 0 {
+			t.Fatalf("GET %s: empty body", path)
+		}
+	}
+}
+
+func floatPtr(v float64) *float64 { return &v }

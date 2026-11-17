@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/George-Anagnostou/fridge/auth"
 	"github.com/George-Anagnostou/fridge/fridge"
+	"github.com/George-Anagnostou/fridge/lookup"
 )
 
 type storesPage struct {
@@ -33,6 +35,21 @@ type storePage struct {
 	Items       []RenderItem
 	UseSoonDays int
 	Error       string
+	Prefill     itemForm
+	LookupMsg   string
+}
+
+type itemForm struct {
+	Name        string
+	Quantity    string
+	Barcode     string
+	Brand       string
+	ServingSize string
+	Calories    string
+	ProteinG    string
+	CarbsG      string
+	FatG        string
+	OpenDetails bool
 }
 
 type membersPage struct {
@@ -152,6 +169,7 @@ func (s *server) renderStore(w http.ResponseWriter, r *http.Request, u auth.User
 		return
 	}
 	useSoon, rest := fridge.PartitionUseSoon(items, time.Now())
+	prefill, lookupMsg := s.prefillItemForm(r, access)
 	if err := s.tmpl.ExecuteTemplate(w, "store.html", storePage{
 		CSRF:        s.csrfToken(r),
 		Email:       u.Email,
@@ -163,6 +181,8 @@ func (s *server) renderStore(w http.ResponseWriter, r *http.Request, u auth.User
 		Items:       toRenderItems(rest),
 		UseSoonDays: fridge.UseSoonDays,
 		Error:       errMsg,
+		Prefill:     prefill,
+		LookupMsg:   lookupMsg,
 	}); err != nil {
 		http.Error(w, "Unable to render template", http.StatusInternalServerError)
 		log.Println("Error rendering template:", err)
@@ -392,5 +412,49 @@ func (s *server) renderStores(w http.ResponseWriter, data storesPage) {
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		http.Error(w, "Unable to render template", http.StatusInternalServerError)
 		log.Println("Error rendering template:", err)
+	}
+}
+
+func (s *server) prefillItemForm(r *http.Request, access fridge.Access) (itemForm, string) {
+	form := itemForm{Quantity: "1"}
+	if !access.CanEdit() || r.Method != http.MethodGet {
+		return form, ""
+	}
+	raw := strings.TrimSpace(r.URL.Query().Get("barcode"))
+	if raw == "" {
+		return form, ""
+	}
+	form.Barcode = raw
+	form.OpenDetails = true
+	res, err := s.resolveLookup(r.Context(), raw)
+	if err != nil {
+		return form, "Lookup failed. You can enter the details yourself."
+	}
+	if !res.Found {
+		if res.Product.Barcode != "" {
+			form.Barcode = res.Product.Barcode
+		}
+		return form, "No product found. You can enter the details yourself."
+	}
+	form = itemFormFromProduct(res.Product)
+	msg := "Found a product."
+	if res.Product.Name != "" {
+		msg = "Found " + res.Product.Name + "."
+	}
+	return form, msg
+}
+
+func itemFormFromProduct(p lookup.Product) itemForm {
+	return itemForm{
+		Name:        p.Name,
+		Quantity:    "1",
+		Barcode:     p.Barcode,
+		Brand:       p.Brand,
+		ServingSize: p.ServingSize,
+		Calories:    formatOptionalFloat(p.Calories),
+		ProteinG:    formatOptionalFloat(p.ProteinG),
+		CarbsG:      formatOptionalFloat(p.CarbsG),
+		FatG:        formatOptionalFloat(p.FatG),
+		OpenDetails: true,
 	}
 }

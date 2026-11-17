@@ -273,3 +273,29 @@ details[open] summary { margin-bottom: 0.4rem; }
   font-size: 0.85rem;
   margin: 0.75rem 0 0.25rem;
 }
+
+.barcode-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0 0 0.5rem;
+}
+.barcode-row input {
+  flex: 1 1 10rem;
+  margin: 0;
+}
+.barcode-row button {
+  flex: 0 0 auto;
+  margin: 0;
+}
+#scan-note { margin: 0 0 0.75rem; }
+#lookup-status { min-height: 1.2em; margin: 0 0 0.75rem; }
+.scanner {
+  width: 100%;
+  margin: 0 0 0.75rem;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #111;
+}
+.scanner video { width: 100%; display: block; }
