@@ -208,3 +208,16 @@ func RegisterWithInvite(db *sql.DB, email, password, inviteToken string) (User, 
 	}
 	return User{ID: id, Email: email, IsAdmin: grantsAdmin != 0}, nil
 }
+
+// InviteStoreID returns the store attached to an invite, if any.
+func InviteStoreID(db *sql.DB, plainToken string) (int64, bool) {
+	if plainToken == "" {
+		return 0, false
+	}
+	var id sql.NullInt64
+	err := db.QueryRow(`SELECT store_id FROM invites WHERE token_hash = ?`, HashToken(plainToken)).Scan(&id)
+	if err != nil || !id.Valid || id.Int64 <= 0 {
+		return 0, false
+	}
+	return id.Int64, true
+}

@@ -868,19 +868,27 @@ func TestStoreInviteCreatesAccountAndMembership(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("GET /signup status = %d", status)
 	}
+	prev := guest.CheckRedirect
+	guest.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 	resp, err = guest.PostForm(srv.URL+"/signup", url.Values{
 		"csrf_token": {csrf},
 		"token":      {invite},
 		"email":      {"new@example.com"},
 		"password":   {"password123"},
 	})
+	guest.CheckRedirect = prev
 	if err != nil {
 		t.Fatalf("POST /signup: %v", err)
 	}
 	bodyBytes, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("POST /signup status = %d; body: %s", resp.StatusCode, bodyBytes)
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST /signup status = %d, want 303; body: %s", resp.StatusCode, bodyBytes)
+	}
+	if loc := resp.Header.Get("Location"); loc != storePath(storeID, "") {
+		t.Fatalf("POST /signup Location = %q, want %s", loc, storePath(storeID, ""))
 	}
 
 	resp, err = guest.Get(srv.URL + storePath(storeID, ""))
