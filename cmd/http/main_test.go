@@ -1560,3 +1560,98 @@ func TestStorePageHasODbLCredit(t *testing.T) {
 		t.Fatalf("store page missing ODbL credit: %s", body)
 	}
 }
+
+func TestLookupUSDAFallback(t *testing.T) {
+	const code = "1234567890123"
+	off := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"product": map[string]any{
+				"product_name": "OFF Milk",
+				"brands":       "OFF Brand",
+			},
+		})
+	}))
+	t.Cleanup(off.Close)
+
+	usda := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"foods": []any{
+				map[string]any{
+					"description": "USDA Milk",
+					"brandName":   "USDA Brand",
+					"gtinUpc":     code,
+					"foodNutrients": []any{
+						map[string]any{"nutrientId": 1008, "nutrientName": "Energy", "unitName": "KCAL", "value": 140},
+					},
+				},
+			},
+		})
+	}))
+	t.Cleanup(usda.Close)
+
+	srv, db := testServerSetup(t, func(s *server) {
+		s.off = lookup.NewOFFClient(off.URL, lookup.DefaultUserAgent, off.Client())
+		s.usda = lookup.NewUSDAClient(usda.URL, "test-key", usda.Client())
+	})
+	client := newClient(t, srv)
+	signup(t, srv, db, client, "user@example.com", "password123")
+
+	resp, err := client.Get(srv.URL + "/lookup?barcode=" + code)
+	if err != nil {
+		t.Fatalf("GET /lookup: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", resp.StatusCode, body)
+	}
+	var got lookup.Product
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v; body: %s", err, body)
+	}
+	if got.Name != "OFF Milk" || got.Brand != "OFF Brand" {
+		t.Fatalf("OFF fields should win: %+v", got)
+	}
+	if got.Calories == nil || *got.Calories != 140 {
+		t.Fatalf("USDA should fill calories: %+v", got)
+	}
+}
+
+func TestLookupSkipsUSDAWithoutKey(t *testing.T) {
+	var usdaHits atomic.Int32
+	usda := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		usdaHits.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"foods":[]}`))
+	}))
+	t.Cleanup(usda.Close)
+
+	off := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"status":"failure"}`))
+	}))
+	t.Cleanup(off.Close)
+
+	t.Setenv("USDA_FDC_API_KEY", "")
+	srv, db := testServerSetup(t, func(s *server) {
+		s.off = lookup.NewOFFClient(off.URL, lookup.DefaultUserAgent, off.Client())
+		s.usda = lookup.NewUSDAClientFromEnv()
+	})
+	client := newClient(t, srv)
+	signup(t, srv, db, client, "user@example.com", "password123")
+
+	resp, err := client.Get(srv.URL + "/lookup?barcode=12345678")
+	if err != nil {
+		t.Fatalf("GET /lookup: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 when OFF misses and USDA is disabled", resp.StatusCode)
+	}
+	if usdaHits.Load() != 0 {
+		t.Fatalf("USDA hits = %d, want 0", usdaHits.Load())
+	}
+}

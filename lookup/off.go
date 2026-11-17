@@ -136,10 +136,11 @@ func parseOFFProduct(barcode string, body []byte) (Result, error) {
 
 func mapOFFProduct(barcode string, raw map[string]any) Product {
 	p := Product{
-		Barcode: barcode,
-		Source:  SourceOFF,
-		Name:    firstString(raw, "product_name", "product_name_en", "abbreviated_product_name", "generic_name"),
-		Brand:   firstBrand(raw),
+		Barcode:     barcode,
+		Source:      SourceOFF,
+		Name:        firstString(raw, "product_name", "product_name_en", "abbreviated_product_name", "generic_name"),
+		Brand:       firstBrand(raw),
+		ServingSize: firstString(raw, "serving_size"),
 	}
 	// expiration_date (and similar OFF date fields) are intentionally ignored.
 
@@ -151,7 +152,6 @@ func mapOFFProduct(barcode string, raw map[string]any) Product {
 	hasServing := servingCals != nil || servingProt != nil || servingCarb != nil || servingFat != nil
 
 	if hasServing {
-		p.ServingSize = firstString(raw, "serving_size")
 		p.Calories, p.ProteinG, p.CarbsG, p.FatG = servingCals, servingProt, servingCarb, servingFat
 		return p
 	}
@@ -161,6 +161,7 @@ func mapOFFProduct(barcode string, raw map[string]any) Product {
 	per100Carb := nutrientValue(nutriments, "carbohydrates_100g", "carbohydrates")
 	per100Fat := nutrientValue(nutriments, "fat_100g", "fat")
 	if per100Cals != nil || per100Prot != nil || per100Carb != nil || per100Fat != nil {
+		// Label the nutrition as per 100g so it is not mistaken for a serving.
 		p.ServingSize = "per 100g"
 		p.Calories, p.ProteinG, p.CarbsG, p.FatG = per100Cals, per100Prot, per100Carb, per100Fat
 	}
