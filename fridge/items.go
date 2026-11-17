@@ -13,10 +13,10 @@ import (
 const UseSoonDays = 3
 
 var (
-	ErrInvalidItemName    = errors.New("item name is required")
-	ErrInvalidQuantity    = errors.New("quantity must be zero or greater")
-	ErrInvalidExpiration  = errors.New("expiration date is required")
-	ErrInvalidNutrition   = errors.New("nutrition values must be zero or greater")
+	ErrInvalidItemName   = errors.New("item name is required")
+	ErrInvalidQuantity   = errors.New("quantity must be zero or greater")
+	ErrInvalidExpiration = errors.New("expiration date is required")
+	ErrInvalidNutrition  = errors.New("nutrition values must be zero or greater")
 )
 
 func ValidateItem(item Item) error {
