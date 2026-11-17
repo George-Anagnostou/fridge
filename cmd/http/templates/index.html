@@ -1,43 +1,48 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{template "head"}}
     <title>Fridge Manager</title>
 </head>
 <body>
-    <h1>Fridge Manager</h1>
-    {{if .Email}}
-    <p>
-        Signed in as {{.Email}}
-        {{if .IsAdmin}} · <a href="/admin/invites">Sign-up invites</a>{{end}}
-        <form action="/logout" method="POST" style="display:inline;">
-            <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-            <button type="submit">Log out</button>
-        </form>
-    </p>
-    {{end}}
+<div class="wrap">
+    <header class="top">
+        <a class="brand" href="/">Fridge</a>
+        {{if .Email}}
+        <div class="who">
+            <span>{{.Email}}</span>
+            {{if .IsAdmin}}<a href="/admin/invites">Invites</a>{{end}}
+            <form action="/logout" method="POST">
+                <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+                <button type="submit" class="btn-quiet">Log out</button>
+            </form>
+        </div>
+        {{end}}
+    </header>
 
-    {{if .Error}}<p>{{.Error}}</p>{{end}}
+    <h1>Your stores</h1>
+    {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 
-    <h2>Your stores</h2>
-    <ul>
+    <ul class="list">
     {{range .Stores}}
         <li>
-            <a href="/stores/{{.ID}}">{{.Name}}</a>
-            ({{.Permission}})
+            <a class="card" href="/stores/{{.ID}}">
+                <p class="card-title">{{.Name}}</p>
+                <p class="perm">{{.Permission}}</p>
+            </a>
         </li>
     {{else}}
-        <li>No stores yet.</li>
+        <li class="empty">No stores yet. Create one below.</li>
     {{end}}
     </ul>
 
     <h2>Create a store</h2>
-    <form action="/stores" method="POST">
+    <form class="stack" action="/stores" method="POST">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-        <label for="name">Name:</label>
-        <input type="text" id="name" name="name" required>
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" autocomplete="off" required>
         <button type="submit">Create store</button>
     </form>
+</div>
 </body>
 </html>

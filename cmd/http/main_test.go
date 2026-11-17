@@ -729,7 +729,7 @@ func TestStoreIsolationAndPermissionsHTTP(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("viewer GET status = %d; body: %s", resp.StatusCode, body)
 	}
-	if strings.Contains(string(body), "Add Item") {
+	if strings.Contains(string(body), "Add item") {
 		t.Fatalf("viewer saw add form: %s", body)
 	}
 
@@ -900,7 +900,7 @@ func TestStoreInviteCreatesAccountAndMembership(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("new member GET store status = %d; body: %s", resp.StatusCode, bodyBytes)
 	}
-	if !strings.Contains(string(bodyBytes), "Add Item") {
+	if !strings.Contains(string(bodyBytes), "Add item") {
 		t.Fatalf("edit member should see add form: %s", bodyBytes)
 	}
 
@@ -1194,5 +1194,145 @@ func TestUseSoonOrderingHTTP(t *testing.T) {
 	}
 	if strings.Contains(rest, "Expired") || strings.Contains(rest, ">Soon<") || strings.Contains(rest, "Soon -") {
 		t.Fatalf("expired/soon should not be in remaining items: %s", rest)
+	}
+}
+
+func hasViewportMeta(body string) bool {
+	return strings.Contains(body, `name="viewport"`) &&
+		strings.Contains(body, "width=device-width") &&
+		strings.Contains(body, `/static/app.css`)
+}
+
+func TestMobilePagesHaveViewport(t *testing.T) {
+	srv, db := testServer(t)
+
+	resp, err := srv.Client().Get(srv.URL + "/static/app.css")
+	if err != nil {
+		t.Fatalf("GET /static/app.css: %v", err)
+	}
+	css, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /static/app.css status = %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(css), "--tap") {
+		t.Fatalf("stylesheet missing tap-target styles, got %d bytes", len(css))
+	}
+
+	anon := newClient(t, srv)
+	for _, path := range []string{"/login", "/signup"} {
+		_, body, status := getCSRF(t, anon, srv.URL+path)
+		if status != http.StatusOK {
+			t.Fatalf("GET %s status = %d", path, status)
+		}
+		if !hasViewportMeta(body) {
+			t.Fatalf("GET %s missing viewport meta or stylesheet: %s", path, body)
+		}
+	}
+
+	owner := newClient(t, srv)
+	signupAdmin(t, srv, db, owner, "admin@example.com", "password123")
+	storeID := createStore(t, srv, owner, "Pantry")
+	itemID := addItem(t, srv, owner, storeID, url.Values{
+		"name":       {"Milk"},
+		"quantity":   {"1"},
+		"expiration": {"2026-12-01"},
+	})
+
+	pages := []string{
+		"/",
+		storePath(storeID, ""),
+		storePath(storeID, "/items/"+strconv.Itoa(itemID)+"/edit"),
+		storePath(storeID, "/members"),
+		"/admin/invites",
+	}
+	for _, path := range pages {
+		_, body, status := getCSRF(t, owner, srv.URL+path)
+		if status != http.StatusOK {
+			t.Fatalf("GET %s status = %d; body: %s", path, status, body)
+		}
+		if !hasViewportMeta(body) {
+			t.Fatalf("GET %s missing viewport meta or stylesheet: %s", path, body)
+		}
+	}
+}
+
+func TestMobileItemFormPosts(t *testing.T) {
+	srv, db := testServer(t)
+	client := newClient(t, srv)
+	signup(t, srv, db, client, "user@example.com", "password123")
+	storeID := createStore(t, srv, client, "Pantry")
+
+	itemID := addItem(t, srv, client, storeID, url.Values{
+		"name":       {"Yogurt"},
+		"quantity":   {"2"},
+		"expiration": {"2026-12-01"},
+		"brand":      {"Dairy Co"},
+	})
+	_, body, status := getCSRF(t, client, srv.URL+storePath(storeID, ""))
+	if status != http.StatusOK {
+		t.Fatalf("GET store after add status = %d", status)
+	}
+	if !strings.Contains(body, "Yogurt") || !hasViewportMeta(body) {
+		t.Fatalf("store page after add missing item or viewport: %s", body)
+	}
+
+	editURL := srv.URL + storePath(storeID, "/items/"+strconv.Itoa(itemID)+"/edit")
+	token, formBody, status := getCSRF(t, client, editURL)
+	if status != http.StatusOK {
+		t.Fatalf("GET edit status = %d; body: %s", status, formBody)
+	}
+	if !hasViewportMeta(formBody) {
+		t.Fatalf("edit page missing viewport: %s", formBody)
+	}
+	prev := client.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := client.PostForm(editURL, url.Values{
+		"csrf_token": {token},
+		"name":       {"Greek Yogurt"},
+		"quantity":   {"3"},
+		"expiration": {"2026-12-05"},
+		"brand":      {"Dairy Co"},
+	})
+	client.CheckRedirect = prev
+	if err != nil {
+		t.Fatalf("POST edit: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST edit status = %d, want 303", resp.StatusCode)
+	}
+
+	token, body, status = getCSRF(t, client, srv.URL+storePath(storeID, ""))
+	if status != http.StatusOK {
+		t.Fatalf("GET store after edit status = %d", status)
+	}
+	if !strings.Contains(body, "Greek Yogurt") {
+		t.Fatalf("store page after edit missing updated name: %s", body)
+	}
+
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err = client.PostForm(srv.URL+storePath(storeID, "/items/remove"), url.Values{
+		"csrf_token": {token},
+		"id":         {strconv.Itoa(itemID)},
+	})
+	client.CheckRedirect = prev
+	if err != nil {
+		t.Fatalf("POST remove: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST remove status = %d, want 303", resp.StatusCode)
+	}
+	_, body, status = getCSRF(t, client, srv.URL+storePath(storeID, ""))
+	if status != http.StatusOK {
+		t.Fatalf("GET store after remove status = %d", status)
+	}
+	if strings.Contains(body, "Greek Yogurt") {
+		t.Fatalf("removed item still listed: %s", body)
 	}
 }
