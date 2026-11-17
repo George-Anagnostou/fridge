@@ -13,6 +13,7 @@ import (
 
 	"github.com/George-Anagnostou/fridge/auth"
 	"github.com/George-Anagnostou/fridge/fridge"
+	"github.com/George-Anagnostou/fridge/lookup"
 )
 
 //go:embed templates/*.html
@@ -81,15 +82,25 @@ type server struct {
 	tmpl         *template.Template
 	cookieSecure bool
 	sessionTTL   time.Duration
+	off          lookup.Source
 }
 
-func newMux(db *sql.DB) http.Handler {
-	s := &server{
+func newServer(db *sql.DB) *server {
+	return &server{
 		db:           db,
 		tmpl:         tmpl,
 		cookieSecure: cookieSecureFromEnv(),
 		sessionTTL:   auth.DefaultSessionTTL,
 	}
+}
+
+func newMux(db *sql.DB) http.Handler {
+	s := newServer(db)
+	s.off = lookup.NewOFFClientFromEnv()
+	return s.handler()
+}
+
+func (s *server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.FileServer(http.FS(staticFS)))
 	mux.HandleFunc("GET /login", s.ensureCSRF(s.loginForm))
