@@ -11,18 +11,12 @@ import (
 )
 
 func (s *server) resolveLookup(ctx context.Context, raw string) (lookup.Result, error) {
-	cache := lookup.NewCache(s.db)
-	if s.off == nil {
-		res, ok, err := cache.GetCached(ctx, raw, lookup.SourceOFF)
-		if err != nil {
-			return lookup.Result{}, err
-		}
-		if !ok {
-			return lookup.Result{Found: false, Product: lookup.Product{Barcode: res.Product.Barcode}}, nil
-		}
-		return res, nil
+	r := &lookup.Resolver{
+		Cache: lookup.NewCache(s.db),
+		OFF:   s.off,
+		USDA:  s.usda,
 	}
-	return cache.GetOrFetch(ctx, raw, lookup.SourceOFF, s.off)
+	return r.Lookup(ctx, raw)
 }
 
 func (s *server) lookupHandler(w http.ResponseWriter, r *http.Request) {

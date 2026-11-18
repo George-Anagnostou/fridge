@@ -4,7 +4,7 @@ A simple personal inventory app (Go + SQLite). Item pages and APIs require a
 logged-in account and are scoped to a store (`/stores/{id}`). Owners and
 edit members can add and edit items, including optional barcode, brand, and
 basic nutrition. The store page lists expired items and those expiring within
-3 days first. Pages are styled for a phone, with optional item fields tucked into a details section. Logged-in users can call `GET /lookup?barcode=` to look up a product: the local cache first, then Open Food Facts v3 on a miss (USDA fallback comes later). Product details from Open Food Facts are credited under the add form's optional details, and are available under the Open Database License. Buying the same item again adds a new row. Sign-up is
+3 days first. Pages are styled for a phone, with optional item fields tucked into a details section. Logged-in users can call `GET /lookup?barcode=` to look up a product: the local cache first, then Open Food Facts v3, then USDA FoodData Central as a fallback when `USDA_FDC_API_KEY` is set. USDA fills gaps in an OFF result, or is used on its own when OFF misses. When both sources have the same field, the Open Food Facts value is kept. Product details from Open Food Facts are credited under the add form's optional details, and are available under the Open Database License. Buying the same item again adds a new row. Sign-up is
 invite-only; an admin can create general sign-up invites, and a store owner
 can share by email. If the address already has an account, that user is added
 as a member; otherwise the owner is shown a sign-up invite link (no email is
@@ -15,7 +15,7 @@ created.
 
 ## Run locally
 
-The HTTP server reads `FRIDGE_DB` (default `./fridge.db`) and listens on `FRIDGE_ADDR` (default `127.0.0.1:8080`) so it is not reachable around nginx. Barcode lookup calls Open Food Facts at `OFF_BASE_URL` (default `https://world.openfoodfacts.org`). Set `OFF_CONTACT` to append a contact address to the User-Agent, which OFF asks for. Lookups are rate-limited on the client to 14 requests per minute and time out after 8 seconds. `PORT` still sets the port on loopback (for example `PORT=3000` listens on `127.0.0.1:3000`). To bind all interfaces, set `FRIDGE_ADDR=:8080` or `FRIDGE_ADDR=0.0.0.0:8080`. Templates are embedded in the binary, so you can start it from any directory.
+The HTTP server reads `FRIDGE_DB` (default `./fridge.db`) and listens on `FRIDGE_ADDR` (default `127.0.0.1:8080`) so it is not reachable around nginx. Barcode lookup calls Open Food Facts at `OFF_BASE_URL` (default `https://world.openfoodfacts.org`). Set `OFF_CONTACT` to append a contact address to the User-Agent, which OFF asks for. Lookups are rate-limited on the client to 14 requests per minute and time out after 8 seconds. USDA fallback is used only when `USDA_FDC_API_KEY` is set; `USDA_FDC_BASE_URL` defaults to `https://api.nal.usda.gov/fdc/v1`. `PORT` still sets the port on loopback (for example `PORT=3000` listens on `127.0.0.1:3000`). To bind all interfaces, set `FRIDGE_ADDR=:8080` or `FRIDGE_ADDR=0.0.0.0:8080`. Templates are embedded in the binary, so you can start it from any directory.
 
 ```sh
 go run ./cmd/http

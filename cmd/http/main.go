@@ -83,6 +83,7 @@ type server struct {
 	cookieSecure bool
 	sessionTTL   time.Duration
 	off          lookup.Source
+	usda         lookup.Source
 }
 
 func newServer(db *sql.DB) *server {
@@ -97,6 +98,7 @@ func newServer(db *sql.DB) *server {
 func newMux(db *sql.DB) http.Handler {
 	s := newServer(db)
 	s.off = lookup.NewOFFClientFromEnv()
+	s.usda = lookup.NewUSDAClientFromEnv()
 	return s.handler()
 }
 
