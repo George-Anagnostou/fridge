@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, preview]
+  workflow_dispatch:
+
+# Checks on every PR. Only branch pushes/manual runs can access deployment environments.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Never interrupt a release switch. PR checks can be superseded freely.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l $(git ls-files '*.go'))"
+      - name: go vet
+        run: go vet ./...
+      - name: go test -race
+        run: CGO_ENABLED=1 go test -race ./...
+      - name: CGO-free build
+        run: CGO_ENABLED=0 go build ./...
+      - name: Cross-build server and invite CLI
+        env:
+          GIT_SHA: ${{ github.sha }}
+        run: make build-server build-invite-linux
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            dist/fridge-server-linux-amd64
+            dist/fridge-invite-linux-amd64
+          if-no-files-found: error
+          retention-days: 7
+
+  # Deploy files, checked without deploying: shell lint, local-mode script
+  # tests, and nginx -t on the production and preview site configs.
+  deploy-files:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck sqlite3
+      - run: shellcheck scripts/*.sh
+      - run: sh scripts/deploy_test.sh
+      - name: nginx -t on bootstrap and HTTPS sites
+        run: |
+          command -v nginx >/dev/null || { sudo apt-get update && sudo apt-get install -y nginx; }
+          sudo cp deploy/nginx/fridge-http.conf /etc/nginx/sites-enabled/fridge.conf
+          sudo nginx -t
+          # Ephemeral test certificate: no production keys or ACME calls in CI.
+          sudo install -d /etc/letsencrypt/live/fridge.georgeanagnostou.com
+          sudo openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj /CN=fridge.georgeanagnostou.com \
+            -keyout /etc/letsencrypt/live/fridge.georgeanagnostou.com/privkey.pem \
+            -out /etc/letsencrypt/live/fridge.georgeanagnostou.com/fullchain.pem
+          sudo cp deploy/nginx/fridge.conf /etc/nginx/sites-enabled/fridge.conf
+          sh scripts/preview-nginx.sh http | sudo tee /etc/nginx/sites-enabled/fridge-preview.conf >/dev/null
+          sudo nginx -t
+          sudo install -d /etc/letsencrypt/live/preview.fridge.georgeanagnostou.com
+          sudo cp /etc/letsencrypt/live/fridge.georgeanagnostou.com/*.pem \
+            /etc/letsencrypt/live/preview.fridge.georgeanagnostou.com/
+          sh scripts/preview-nginx.sh https | sudo tee /etc/nginx/sites-enabled/fridge-preview.conf >/dev/null
+          sudo nginx -t
+
+  deploy:
+    name: Deploy
+    needs: [check, deploy-files]
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/preview')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: deploy-${{ github.ref_name }}
+      cancel-in-progress: false
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'preview' }}
+      url: ${{ github.ref_name == 'main' && 'https://fridge.georgeanagnostou.com' || 'https://preview.fridge.georgeanagnostou.com' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Skip superseded commits
+        id: tip
+        run: |
+          latest="$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | cut -f1)"
+          if [ "$latest" = "$GITHUB_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "A newer commit is on $GITHUB_REF_NAME; skipping this deployment." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.tip.outputs.current == 'true'
+        with:
+          name: release-${{ github.sha }}
+          path: dist/
+      - name: Configure pinned SSH connection
+        if: steps.tip.outputs.current == 'true'
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+        run: |
+          test -n "$DEPLOY_KEY" && test -n "$KNOWN_HOSTS"
+          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/fridge
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/fridge ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host fridge-deploy
+            HostName $DEPLOY_HOST
+            User $DEPLOY_USER
+            IdentityFile ~/.ssh/fridge
+            IdentitiesOnly yes
+            BatchMode yes
+            StrictHostKeyChecking yes
+            ConnectTimeout 15
+          EOF
+      - name: Upload, activate, and verify
+        if: steps.tip.outputs.current == 'true'
+        env:
+          FRIDGE_DEPLOY_HOST: fridge-deploy
+          FRIDGE_DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          FRIDGE_URL: ${{ vars.VERIFY_URL }}
+          FRIDGE_SKIP_BUILD: "1"
+          FRIDGE_EXPECTED_SHA: ${{ github.sha }}
+          FRIDGE_DEPLOY_SERVICE: ${{ github.ref_name == 'main' && 'fridge' || 'fridge-preview' }}
+        run: |
+          test -n "$FRIDGE_DEPLOY_PATH"
+          # Production always needs public HTTPS verification.
+          if [ "$GITHUB_REF_NAME" = main ]; then
+            test "$FRIDGE_URL" = https://fridge.georgeanagnostou.com
+            test "$FRIDGE_DEPLOY_SERVICE" = fridge
+          else
+            test "$FRIDGE_DEPLOY_SERVICE" = fridge-preview
+          fi
+          sh scripts/deploy.sh
+          echo "Deployed \`$GITHUB_SHA\` to **$GITHUB_REF_NAME**." >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove SSH credentials
+        if: always()
+        run: rm -f ~/.ssh/fridge ~/.ssh/config ~/.ssh/known_hosts

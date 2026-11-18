@@ -1,0 +1,29 @@
+[Unit]
+Description=Fridge inventory app (preview)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fridge
+Group=fridge
+EnvironmentFile=/etc/fridge/fridge-preview.env
+ExecStart=/usr/local/bin/fridge-preview-server
+Restart=on-failure
+RestartSec=2s
+WorkingDirectory=/var/lib/fridge-preview
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/fridge-preview
+
+[Install]
+WantedBy=multi-user.target

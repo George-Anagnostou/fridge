@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"flag"
 	"fmt"
 	"os"
@@ -29,9 +30,12 @@ func Run() error {
 
 	// define flags for remove command
 	removeID := removeCmd.Int("id", 0, "ID of the item to remove")
+	removeStore := removeCmd.Int64("store", 0, "store ID")
 
 	// define flags for list command
 	getID := listCmd.Int("id", 0, "ID of item to get (optional)")
+	listStore := listCmd.Int64("store", 0, "store ID")
+	addStore := addCmd.Int64("store", 0, "store ID")
 
 	// check num args
 	if len(os.Args) < 2 {
@@ -55,12 +59,16 @@ func Run() error {
 			return err
 		}
 
-		id, err := newFridge.AddItem(db, *addName, *addQuantity, expirationDate)
+		storeID, err := resolveStoreID(db, *addStore)
+		if err != nil {
+			return err
+		}
+		id, err := newFridge.AddItem(db, storeID, *addName, *addQuantity, expirationDate)
 		if err != nil {
 			return err
 		}
 
-		item, err := newFridge.GetItemByID(db, id)
+		item, err := newFridge.GetItemByID(db, storeID, id)
 		if err != nil {
 			return err
 		}
@@ -75,8 +83,12 @@ func Run() error {
 			listCmd.PrintDefaults()
 		}
 		listCmd.Parse(os.Args[2:])
+		storeID, err := resolveStoreID(db, *listStore)
+		if err != nil {
+			return err
+		}
 		if *getID == 0 {
-			items, err := newFridge.ListItems(db)
+			items, err := newFridge.ListItems(db, storeID)
 			fmt.Println("Fridge contents:")
 			for _, item := range items {
 				fmt.Println(item)
@@ -84,7 +96,7 @@ func Run() error {
 			return err
 
 		}
-		item, err := newFridge.GetItemByID(db, *getID)
+		item, err := newFridge.GetItemByID(db, storeID, *getID)
 		fmt.Printf("Fridge item %03d\n", *getID)
 		fmt.Println(item)
 		return err
@@ -99,8 +111,12 @@ func Run() error {
 			fmt.Println("provide the id of the item to remove")
 			return fridge.ErrNumArgs
 		}
+		storeID, err := resolveStoreID(db, *removeStore)
+		if err != nil {
+			return err
+		}
 		fmt.Printf("Removing item %03d\n", *removeID)
-		return newFridge.RemoveItem(db, *removeID)
+		return newFridge.RemoveItem(db, storeID, *removeID)
 
 	case "-h", "-help", "--help":
 		fmt.Println("Usage of fridge: ")
@@ -124,4 +140,22 @@ func PrintUsage() {
 	fmt.Println("    list")
 	fmt.Println("    remove")
 	flag.PrintDefaults()
+}
+
+func resolveStoreID(db *sql.DB, flagID int64) (int64, error) {
+	if flagID > 0 {
+		return flagID, nil
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM stores`).Scan(&count); err != nil {
+		return 0, err
+	}
+	if count == 1 {
+		var id int64
+		if err := db.QueryRow(`SELECT id FROM stores`).Scan(&id); err != nil {
+			return 0, err
+		}
+		return id, nil
+	}
+	return 0, fmt.Errorf("pass -store with the store ID (found %d stores)", count)
 }

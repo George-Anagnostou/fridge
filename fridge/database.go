@@ -2,16 +2,15 @@ package fridge
 
 import (
 	"database/sql"
-	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 const DefaultDBPath = "./fridge.db"
-
-const busyTimeoutMS = 5000
 
 // DBPath returns the SQLite path from FRIDGE_DB, or DefaultDBPath if unset.
 func DBPath() string {
@@ -22,18 +21,30 @@ func DBPath() string {
 }
 
 func sqliteDSN(path string) string {
-	const timeout = "_busy_timeout="
-
 	if strings.HasPrefix(path, "file:") {
-		if strings.Contains(path, "?") {
-			return path + "&" + timeout + fmt.Sprint(busyTimeoutMS)
+		u, err := url.Parse(path)
+		if err == nil {
+			q := u.Query()
+			q.Add("_pragma", "foreign_keys(1)")
+			q.Add("_pragma", "busy_timeout(5000)")
+			u.RawQuery = q.Encode()
+			return u.String()
 		}
-		return path + "?" + timeout + fmt.Sprint(busyTimeoutMS)
 	}
-	if strings.Contains(path, "?") {
-		return "file:" + path + "&" + timeout + fmt.Sprint(busyTimeoutMS)
+
+	abs := path
+	if resolved, err := filepath.Abs(path); err == nil {
+		abs = resolved
 	}
-	return "file:" + path + "?" + timeout + fmt.Sprint(busyTimeoutMS)
+	u := url.URL{
+		Scheme: "file",
+		Path:   abs,
+	}
+	q := u.Query()
+	q.Add("_pragma", "foreign_keys(1)")
+	q.Add("_pragma", "busy_timeout(5000)")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func InitDB(path string) (*sql.DB, error) {
@@ -41,7 +52,7 @@ func InitDB(path string) (*sql.DB, error) {
 		path = DefaultDBPath
 	}
 
-	db, err := sql.Open("sqlite3", sqliteDSN(path))
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, err
 	}
@@ -50,30 +61,7 @@ func InitDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	_, err = db.Exec(`
-        CREATE TABLE IF NOT EXISTS fridge (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            quantity NUMBER NOT NULL,
-            expiration_date DATETIME,
-            last_changed DATETIME DEFAULT CURRENT_TIMESTAMP
-    );`)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-
-	createTriggerSQL := `
-    CREATE TRIGGER IF NOT EXISTS update_last_changed
-    AFTER UPDATE ON fridge
-    FOR EACH ROW
-    BEGIN
-        UPDATE fridge SET last_changed = CURRENT_TIMESTAMP WHERE id = OLD.id;
-    END;
-    `
-
-	_, err = db.Exec(createTriggerSQL)
-	if err != nil {
+	if err := Migrate(db); err != nil {
 		db.Close()
 		return nil, err
 	}

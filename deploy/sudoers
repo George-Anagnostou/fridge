@@ -1,0 +1,7 @@
+# Narrow sudoers rule for fridge deploy accounts.
+# Installed as /etc/sudoers.d/fridge by scripts/bootstrap-debian.sh.
+# These accounts may only run the install/rollback helper, which itself
+# only starts, stops, or restarts the matching systemd unit (plus the
+# oneshot backup unit used during a deploy).
+fridge-deploy ALL=(root) NOPASSWD: /usr/local/sbin/fridge-switch
+fridge-preview ALL=(root) NOPASSWD: /usr/local/sbin/fridge-switch
