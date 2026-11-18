@@ -104,6 +104,7 @@ func newMux(db *sql.DB) http.Handler {
 
 func (s *server) handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", s.healthzHandler)
 	mux.Handle("GET /static/", http.FileServer(http.FS(staticFS)))
 	mux.HandleFunc("GET /login", s.ensureCSRF(s.loginForm))
 	mux.HandleFunc("POST /login", s.ensureCSRF(s.requireCSRFOnPost(s.loginSubmit)))

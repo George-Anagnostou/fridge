@@ -1723,3 +1723,58 @@ func TestStaticScanAssetsServed(t *testing.T) {
 }
 
 func floatPtr(v float64) *float64 { return &v }
+
+func TestHealthz(t *testing.T) {
+	prev := Commit
+	Commit = "test-commit-sha"
+	t.Cleanup(func() { Commit = prev })
+
+	srv, db := testServer(t)
+	anon := newClient(t, srv)
+
+	resp, err := anon.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("GET /healthz: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", resp.StatusCode, body)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v; body: %s", err, body)
+	}
+	if got["status"] != "ok" || got["commit"] != "test-commit-sha" {
+		t.Fatalf("healthz = %#v, want status=ok commit=test-commit-sha", got)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	resp, err = anon.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("GET /healthz after db close: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status after db close = %d, want 503; body: %s", resp.StatusCode, body)
+	}
+}
+
+func TestPagesHaveNoindexRobots(t *testing.T) {
+	srv, db := testServer(t)
+	client := newClient(t, srv)
+	signup(t, srv, db, client, "user@example.com", "password123")
+	_, body, status := getCSRF(t, client, srv.URL+"/login")
+	if status != http.StatusOK {
+		t.Fatalf("GET /login status = %d", status)
+	}
+	if !strings.Contains(body, `meta name="robots" content="noindex"`) {
+		t.Fatalf("login page missing robots noindex: %s", body)
+	}
+}

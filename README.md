@@ -86,6 +86,14 @@ CGO_ENABLED=1 go test -race ./...
 
 The module requires Go 1.27.4. The SQLite driver is pure Go (`modernc.org/sqlite`), so `CGO_ENABLED=0 go build ./...` works. Race tests still need CGO for the race detector.
 
+## Deploy
+
+Production is `https://fridge.georgeanagnostou.com` and preview is
+`https://preview.fridge.georgeanagnostou.com`, on the same VPS as the other
+personal sites. Sign-up is invite-only. Pages are marked `noindex`. See
+[docs/DEPLOY.md](docs/DEPLOY.md) for bootstrap, GitHub environment setup,
+and `/healthz`.
+
 ## Makefile
 
 `make build-server` cross-compiles a CGO-free Linux amd64 server to `dist/fridge-server-linux-amd64`. `make build` also writes the local CLI, remote CLI, and invite tool to `./build/`.
