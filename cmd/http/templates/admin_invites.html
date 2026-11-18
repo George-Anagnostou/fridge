@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {{template "head"}}
+    <title>Sign-up invites — Fridge Manager</title>
+</head>
+<body>
+<div class="wrap">
+    <header class="top">
+        <a class="brand" href="/">Fridge</a>
+        <div class="who">
+            <a href="/">All stores</a>
+        </div>
+    </header>
+    <p class="crumb"><a href="/">Back to stores</a></p>
+    <h1>Sign-up invites</h1>
+    <p class="muted">Only admins can create links for new accounts. Store-sharing invites are created by a store owner on that store's members page.</p>
+    {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+    {{if .InviteURL}}
+    <div class="invite">
+        <p>Invite created (expires {{.Expires}}):</p>
+        <p><a href="{{.InviteURL}}">{{.InviteURL}}</a></p>
+        <label for="invite-url">Copy link</label>
+        <input type="text" id="invite-url" value="{{.InviteURL}}" readonly>
+    </div>
+    {{end}}
+    <form class="stack" action="/admin/invites" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <button type="submit">Create a sign-up invite</button>
+    </form>
+</div>
+</body>
+</html>

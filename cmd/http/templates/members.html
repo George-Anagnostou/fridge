@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    {{template "head"}}
+    <title>Members — {{.Store.Name}}</title>
+</head>
+<body>
+<div class="wrap">
+    <header class="top">
+        <a class="brand" href="/">Fridge</a>
+        <div class="who">
+            <a href="/stores/{{.Store.ID}}">{{.Store.Name}}</a>
+        </div>
+    </header>
+    <p class="crumb"><a href="/stores/{{.Store.ID}}">Back to {{.Store.Name}}</a></p>
+    <h1>Members</h1>
+    {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+    {{if .Shared}}<p class="flash flash-ok">Added {{.Shared}} as a member.</p>{{end}}
+    {{if .InviteURL}}
+    <div class="invite">
+        <p>No account exists for that email yet. Share this invite link (expires {{.Expires}}):</p>
+        <p><a href="{{.InviteURL}}">{{.InviteURL}}</a></p>
+        <label for="invite-url">Copy link</label>
+        <input type="text" id="invite-url" value="{{.InviteURL}}" readonly>
+    </div>
+    {{end}}
+
+    <h2>Share by email</h2>
+    <form class="stack" action="/stores/{{.Store.ID}}/members" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" autocapitalize="off" required>
+        <label for="permission">Permission</label>
+        <select id="permission" name="permission">
+            <option value="view">view</option>
+            <option value="edit">edit</option>
+        </select>
+        <button type="submit">Share</button>
+    </form>
+
+    <h2>Current members</h2>
+    <ul class="list">
+    {{range .Members}}
+        <li>
+            <p class="card-title">{{.Email}}</p>
+            <p class="perm">{{.Permission}}</p>
+            <form class="stack" action="/stores/{{$.Store.ID}}/members/update" method="POST">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input type="hidden" name="user_id" value="{{.UserID}}">
+                <label for="perm-{{.UserID}}">Permission</label>
+                <select id="perm-{{.UserID}}" name="permission">
+                    <option value="view" {{if eq .Permission "view"}}selected{{end}}>view</option>
+                    <option value="edit" {{if eq .Permission "edit"}}selected{{end}}>edit</option>
+                </select>
+                <div class="actions">
+                    <button type="submit">Update</button>
+                </div>
+            </form>
+            <form action="/stores/{{$.Store.ID}}/members/remove" method="POST">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input type="hidden" name="user_id" value="{{.UserID}}">
+                <button type="submit" class="btn-danger btn-block">Remove</button>
+            </form>
+        </li>
+    {{else}}
+        <li class="empty">No members yet. The owner always has full access.</li>
+    {{end}}
+    </ul>
+</div>
+</body>
+</html>
