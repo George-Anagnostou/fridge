@@ -135,13 +135,20 @@ func removeItem(id string) error {
 	data := url.Values{}
 	data.Set("id", id)
 
-	resp, err := http.PostForm(serverURL+"/remove", data)
+	// Do not follow the 303 to /; treat the redirect itself as success.
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := client.PostForm(serverURL+"/remove", data)
 	if err != nil {
 		return fmt.Errorf("failed to remove item: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusSeeOther {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("failed to remove item, status: %s, response: %s", resp.Status, string(body))
 	}
