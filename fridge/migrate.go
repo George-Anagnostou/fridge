@@ -18,6 +18,7 @@ func allMigrations() []migration {
 		{3, "user_admin_and_invite_meta", migrate003UserAdminAndInviteMeta},
 		{4, "login_attempts", migrate004LoginAttempts},
 		{5, "stores_and_item_scope", migrate005StoresAndItemScope},
+		{6, "item_details", migrate006ItemDetails},
 	}
 }
 
@@ -259,4 +260,22 @@ func ClaimOrphanItems(db *sql.DB, userID int64) error {
 
 func ClaimOrphanItemsTx(tx *sql.Tx, userID int64) error {
 	return assignOrphanItems(tx, userID)
+}
+
+func migrate006ItemDetails(db *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE fridge ADD COLUMN barcode TEXT`,
+		`ALTER TABLE fridge ADD COLUMN brand TEXT`,
+		`ALTER TABLE fridge ADD COLUMN serving_size TEXT`,
+		`ALTER TABLE fridge ADD COLUMN calories REAL`,
+		`ALTER TABLE fridge ADD COLUMN protein_g REAL`,
+		`ALTER TABLE fridge ADD COLUMN carbs_g REAL`,
+		`ALTER TABLE fridge ADD COLUMN fat_g REAL`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }

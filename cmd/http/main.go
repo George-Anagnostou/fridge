@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,21 +23,51 @@ type RenderItem struct {
 	Name           string
 	Quantity       float64
 	ExpirationDate string
+	Barcode        string
+	Brand          string
+	ServingSize    string
+	Calories       string
+	ProteinG       string
+	CarbsG         string
+	FatG           string
+	Expired        bool
 }
 
 func toRenderItems(items []fridge.Item) []RenderItem {
-	var renderItems []RenderItem
+	out := make([]RenderItem, 0, len(items))
+	now := time.Now()
 	for _, item := range items {
-		renderItem := RenderItem{
-			ID:             item.ID,
-			Name:           item.Name,
-			Quantity:       item.Quantity,
-			ExpirationDate: item.ExpirationDate.Format(fridge.DateFormat),
-		}
-		renderItems = append(renderItems, renderItem)
+		out = append(out, toRenderItemAt(item, now))
 	}
+	return out
+}
 
-	return renderItems
+func toRenderItem(item fridge.Item) RenderItem {
+	return toRenderItemAt(item, time.Now())
+}
+
+func toRenderItemAt(item fridge.Item, now time.Time) RenderItem {
+	return RenderItem{
+		ID:             item.ID,
+		Name:           item.Name,
+		Quantity:       item.Quantity,
+		ExpirationDate: item.ExpirationDate.Format(fridge.DateFormat),
+		Barcode:        item.Barcode,
+		Brand:          item.Brand,
+		ServingSize:    item.ServingSize,
+		Calories:       formatOptionalFloat(item.Calories),
+		ProteinG:       formatOptionalFloat(item.ProteinG),
+		CarbsG:         formatOptionalFloat(item.CarbsG),
+		FatG:           formatOptionalFloat(item.FatG),
+		Expired:        fridge.IsExpired(item.ExpirationDate, now),
+	}
+}
+
+func formatOptionalFloat(v *float64) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*v, 'f', -1, 64)
 }
 
 var tmpl = template.Must(template.ParseFS(templateFS, "templates/*.html"))
@@ -73,6 +104,10 @@ func newMux(db *sql.DB) http.Handler {
 	mux.HandleFunc("POST /stores/{id}/items/remove", s.protectHTML(s.removeStoreItemHandler))
 	mux.HandleFunc("GET /stores/{id}/items", s.protectAPI(s.getStoreItemsAPI))
 	mux.HandleFunc("POST /stores/{id}/items", s.protectAPI(s.postStoreItemsAPI))
+	mux.HandleFunc("GET /stores/{id}/items/{itemID}", s.protectAPI(s.getStoreItemAPI))
+	mux.HandleFunc("POST /stores/{id}/items/{itemID}", s.protectAPI(s.postStoreItemAPI))
+	mux.HandleFunc("GET /stores/{id}/items/{itemID}/edit", s.protectHTML(s.editItemForm))
+	mux.HandleFunc("POST /stores/{id}/items/{itemID}/edit", s.protectHTML(s.editItemSubmit))
 	mux.HandleFunc("GET /stores/{id}/members", s.protectHTML(s.requireOwner(s.membersForm)))
 	mux.HandleFunc("POST /stores/{id}/members", s.protectHTML(s.requireOwner(s.membersShare)))
 	mux.HandleFunc("POST /stores/{id}/members/update", s.protectHTML(s.requireOwner(s.membersUpdate)))

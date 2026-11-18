@@ -23,8 +23,8 @@ func TestMigrateFreshDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("appliedMigrationIDs: %v", err)
 	}
-	if !ids[1] || !ids[2] || !ids[3] || !ids[4] || !ids[5] {
-		t.Fatalf("applied migrations = %v, want 1-5", ids)
+	if !ids[1] || !ids[2] || !ids[3] || !ids[4] || !ids[5] || !ids[6] {
+		t.Fatalf("applied migrations = %v, want 1-6", ids)
 	}
 
 	// Re-running InitDB/Migrate is a no-op and keeps data.
@@ -116,8 +116,8 @@ func TestMigrateLegacyDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("appliedMigrationIDs: %v", err)
 	}
-	if !ids[1] || !ids[2] || !ids[3] || !ids[4] || !ids[5] {
-		t.Fatalf("applied migrations = %v, want 1 (stamped) through 5", ids)
+	if !ids[1] || !ids[2] || !ids[3] || !ids[4] || !ids[5] || !ids[6] {
+		t.Fatalf("applied migrations = %v, want 1 (stamped) through 6", ids)
 	}
 }
 
@@ -337,5 +337,85 @@ func TestOrphanItemsClaimedOnFirstUser(t *testing.T) {
 	}
 	if itemStore != storeID {
 		t.Fatalf("item store_id = %d, want %d", itemStore, storeID)
+	}
+}
+
+func TestMigrateAddsItemDetails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-details.db")
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	for _, up := range []func(*sql.DB) error{
+		migrate001InitialFridgeSchema,
+		migrate002UsersSessionsInvites,
+		migrate003UserAdminAndInviteMeta,
+		migrate004LoginAttempts,
+		migrate005StoresAndItemScope,
+	} {
+		if err := up(db); err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			id INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+		t.Fatalf("schema_migrations: %v", err)
+	}
+	for id, name := range map[int]string{
+		1: "initial_fridge_schema",
+		2: "users_sessions_invites",
+		3: "user_admin_and_invite_meta",
+		4: "login_attempts",
+		5: "stores_and_item_scope",
+	} {
+		if err := recordMigration(db, id, name); err != nil {
+			t.Fatalf("stamp %d: %v", id, err)
+		}
+	}
+	res, err := db.Exec(`INSERT INTO users (email, password_hash) VALUES (?, ?)`, "owner@example.com", "x")
+	if err != nil {
+		t.Fatalf("user: %v", err)
+	}
+	ownerID, _ := res.LastInsertId()
+	st, err := db.Exec(`INSERT INTO stores (name, owner_id) VALUES (?, ?)`, "Test", ownerID)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	storeID, _ := st.LastInsertId()
+	if _, err := db.Exec(
+		`INSERT INTO fridge (store_id, name, quantity, expiration_date) VALUES (?, ?, ?, ?)`,
+		storeID, "Milk", 1, "2026-12-01",
+	); err != nil {
+		t.Fatalf("item: %v", err)
+	}
+	db.Close()
+
+	migrated, err := InitDB(path)
+	if err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	t.Cleanup(func() { migrated.Close() })
+
+	var barcode, brand, serving sql.NullString
+	var calories, protein, carbs, fat sql.NullFloat64
+	if err := migrated.QueryRow(
+		`SELECT barcode, brand, serving_size, calories, protein_g, carbs_g, fat_g FROM fridge WHERE name = ?`,
+		"Milk",
+	).Scan(&barcode, &brand, &serving, &calories, &protein, &carbs, &fat); err != nil {
+		t.Fatalf("new columns missing or row lost: %v", err)
+	}
+	if barcode.Valid || brand.Valid || serving.Valid || calories.Valid || protein.Valid || carbs.Valid || fat.Valid {
+		t.Fatalf("legacy item got unexpected values after migrate 6")
+	}
+	ids, err := appliedMigrationIDs(migrated)
+	if err != nil {
+		t.Fatalf("appliedMigrationIDs: %v", err)
+	}
+	if !ids[6] {
+		t.Fatalf("applied migrations = %v, want 6", ids)
 	}
 }
