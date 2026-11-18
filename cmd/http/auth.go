@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -237,7 +238,11 @@ func (s *server) signupSubmit(w http.ResponseWriter, r *http.Request) {
 		log.Println("signup session:", err)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	next := "/"
+	if storeID, ok := auth.InviteStoreID(s.db, token); ok {
+		next = "/stores/" + strconv.FormatInt(storeID, 10)
+	}
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
 func (s *server) logout(w http.ResponseWriter, r *http.Request) {

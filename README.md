@@ -1,8 +1,14 @@
 # The Fridge
 
 A simple personal inventory app (Go + SQLite). Item pages and APIs require a
-logged-in account. Sign-up is invite-only; only an admin can create sign-up
-invites. (Inviting someone to share a fridge is a separate feature.)
+logged-in account and are scoped to a store (`/stores/{id}`). Sign-up is
+invite-only; an admin can create general sign-up invites, and a store owner
+can share by email. If the address already has an account, that user is added
+as a member; otherwise the owner is shown a sign-up invite link (no email is
+sent). Existing items from before stores existed are moved into a default
+store owned by the first admin, or the first user if there is no admin. If
+there are items but no users yet, they are attached when the first account is
+created.
 
 ## Run locally
 

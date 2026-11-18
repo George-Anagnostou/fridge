@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -43,9 +44,14 @@ func newClient(t *testing.T, srv *httptest.Server) *http.Client {
 	if err != nil {
 		t.Fatalf("cookiejar: %v", err)
 	}
-	c := srv.Client()
-	c.Jar = jar
-	c.Timeout = 5 * time.Second
+	// srv.Client() may return a shared instance; copy so each jar stays separate.
+	base := srv.Client()
+	c := &http.Client{
+		Transport:     base.Transport,
+		CheckRedirect: base.CheckRedirect,
+		Jar:           jar,
+		Timeout:       5 * time.Second,
+	}
 	return c
 }
 
@@ -127,6 +133,46 @@ func signupAdmin(t *testing.T, srv *httptest.Server, db *sql.DB, client *http.Cl
 	}
 }
 
+func createStore(t *testing.T, srv *httptest.Server, client *http.Client, name string) int64 {
+	t.Helper()
+	token, _, status := getCSRF(t, client, srv.URL+"/")
+	if status != http.StatusOK {
+		t.Fatalf("GET / for create store status = %d", status)
+	}
+	// Do not follow the 303 so we can read the new store ID from Location.
+	prev := client.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	defer func() { client.CheckRedirect = prev }()
+	resp, err := client.PostForm(srv.URL+"/stores", url.Values{
+		"csrf_token": {token},
+		"name":       {name},
+	})
+	if err != nil {
+		t.Fatalf("POST /stores: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /stores status = %d, want 303; body: %s", resp.StatusCode, b)
+	}
+	loc := resp.Header.Get("Location")
+	m := regexp.MustCompile(`/stores/(\d+)`).FindStringSubmatch(loc)
+	if len(m) != 2 {
+		t.Fatalf("POST /stores Location = %q, want /stores/{id}", loc)
+	}
+	id, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil {
+		t.Fatalf("store id: %v", err)
+	}
+	return id
+}
+
+func storePath(id int64, suffix string) string {
+	return "/stores/" + strconv.FormatInt(id, 10) + suffix
+}
+
 func TestGetIndexAnyCwd(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -164,10 +210,11 @@ func TestGetItemsEmptyJSONArray(t *testing.T) {
 	srv, db := testServer(t)
 	client := newClient(t, srv)
 	signup(t, srv, db, client, "user@example.com", "password123")
+	storeID := createStore(t, srv, client, "Test store")
 
-	resp, err := client.Get(srv.URL + "/items")
+	resp, err := client.Get(srv.URL + storePath(storeID, "/items"))
 	if err != nil {
-		t.Fatalf("GET /items: %v", err)
+		t.Fatalf("GET /stores/{id}/items: %v", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -175,7 +222,7 @@ func TestGetItemsEmptyJSONArray(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /items status = %d, want 200; body: %s", resp.StatusCode, body)
+		t.Fatalf("GET /stores/{id}/items status = %d, want 200; body: %s", resp.StatusCode, body)
 	}
 
 	var items []fridge.Item
@@ -183,14 +230,14 @@ func TestGetItemsEmptyJSONArray(t *testing.T) {
 		t.Fatalf("decode JSON: %v; body: %s", err, body)
 	}
 	if items == nil {
-		t.Fatalf("GET /items decoded nil slice, raw body: %s", body)
+		t.Fatalf("GET /stores/{id}/items decoded nil slice, raw body: %s", body)
 	}
 	if string(body) != "[]\n" && string(body) != "[]" {
 		if strings.TrimSpace(string(body)) == "null" {
-			t.Fatalf("GET /items body = %q, want []", body)
+			t.Fatalf("GET /stores/{id}/items body = %q, want []", body)
 		}
 		if len(items) != 0 {
-			t.Fatalf("GET /items len = %d, want 0; body: %s", len(items), body)
+			t.Fatalf("GET /stores/{id}/items len = %d, want 0; body: %s", len(items), body)
 		}
 	}
 }
@@ -202,20 +249,21 @@ func TestRemoveInvalidDoesNotHang(t *testing.T) {
 		return http.ErrUseLastResponse
 	}
 	signup(t, srv, db, client, "user@example.com", "password123")
+	storeID := createStore(t, srv, client, "Test store")
 
-	token, _, status := getCSRF(t, client, srv.URL+"/")
+	token, _, status := getCSRF(t, client, srv.URL+storePath(storeID, ""))
 	if status != http.StatusOK {
-		t.Fatalf("GET / status = %d", status)
+		t.Fatalf("GET /stores/{id} status = %d", status)
 	}
 
 	postRemove := func(id string) *http.Response {
 		t.Helper()
-		resp, err := client.PostForm(srv.URL+"/remove", url.Values{
+		resp, err := client.PostForm(srv.URL+storePath(storeID, "/items/remove"), url.Values{
 			"id":         {id},
 			"csrf_token": {token},
 		})
 		if err != nil {
-			t.Fatalf("POST /remove id=%q: %v", id, err)
+			t.Fatalf("POST remove id=%q: %v", id, err)
 		}
 		return resp
 	}
@@ -234,33 +282,33 @@ func TestRemoveInvalidDoesNotHang(t *testing.T) {
 		t.Fatalf("missing id status = %d, want 303; body: %s", resp.StatusCode, body)
 	}
 
-	resp, err := client.Get(srv.URL + "/")
+	resp, err := client.Get(srv.URL + storePath(storeID, ""))
 	if err != nil {
-		t.Fatalf("GET / after failed removes: %v", err)
+		t.Fatalf("GET store after failed removes: %v", err)
 	}
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET / after failed removes status = %d, want 200; body: %s", resp.StatusCode, body)
+		t.Fatalf("GET store after failed removes status = %d, want 200; body: %s", resp.StatusCode, body)
 	}
 
-	token, _, status = getCSRF(t, client, srv.URL+"/")
+	token, _, status = getCSRF(t, client, srv.URL+storePath(storeID, ""))
 	if status != http.StatusOK {
-		t.Fatalf("GET / for add csrf status = %d", status)
+		t.Fatalf("GET store for add csrf status = %d", status)
 	}
-	resp, err = client.PostForm(srv.URL+"/", url.Values{
+	resp, err = client.PostForm(srv.URL+storePath(storeID, ""), url.Values{
 		"csrf_token": {token},
 		"name":       {"Milk"},
 		"quantity":   {"1"},
 		"expiration": {"2026-11-17"},
 	})
 	if err != nil {
-		t.Fatalf("POST / add after failed removes: %v", err)
+		t.Fatalf("POST add after failed removes: %v", err)
 	}
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("POST / add status = %d, want 200 or 303; body: %s", resp.StatusCode, body)
+		t.Fatalf("POST add status = %d, want 200 or 303; body: %s", resp.StatusCode, body)
 	}
 }
 
@@ -284,22 +332,22 @@ func TestUnauthenticatedAccess(t *testing.T) {
 		t.Fatalf("GET / Location = %q, want /login...", loc)
 	}
 
-	resp, err = client.Get(srv.URL + "/items")
+	resp, err = client.Get(srv.URL + "/stores/1/items")
 	if err != nil {
-		t.Fatalf("GET /items: %v", err)
+		t.Fatalf("GET /stores/1/items: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("GET /items unauthenticated status = %d, want 401", resp.StatusCode)
+		t.Fatalf("GET /stores/1/items unauthenticated status = %d, want 401", resp.StatusCode)
 	}
 
-	resp, err = client.PostForm(srv.URL+"/items", url.Values{})
+	resp, err = client.PostForm(srv.URL+"/stores/1/items", url.Values{})
 	if err != nil {
-		t.Fatalf("POST /items: %v", err)
+		t.Fatalf("POST /stores/1/items: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("POST /items unauthenticated status = %d, want 401", resp.StatusCode)
+		t.Fatalf("POST /stores/1/items unauthenticated status = %d, want 401", resp.StatusCode)
 	}
 }
 
@@ -402,34 +450,34 @@ func TestCSRFRejection(t *testing.T) {
 	signup(t, srv, db, client, "user@example.com", "password123")
 
 	// Missing token
-	resp, err := client.PostForm(srv.URL+"/", url.Values{
+	resp, err := client.PostForm(srv.URL+"/stores", url.Values{
 		"name":       {"Milk"},
 		"quantity":   {"1"},
 		"expiration": {"2026-11-17"},
 	})
 	if err != nil {
-		t.Fatalf("POST / without csrf: %v", err)
+		t.Fatalf("POST /stores without csrf: %v", err)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("POST / without csrf status = %d, want 403; body: %s", resp.StatusCode, body)
+		t.Fatalf("POST /stores without csrf status = %d, want 403; body: %s", resp.StatusCode, body)
 	}
 
 	// Wrong token
-	resp, err = client.PostForm(srv.URL+"/", url.Values{
+	resp, err = client.PostForm(srv.URL+"/stores", url.Values{
 		"csrf_token": {"totally-wrong"},
 		"name":       {"Milk"},
 		"quantity":   {"1"},
 		"expiration": {"2026-11-17"},
 	})
 	if err != nil {
-		t.Fatalf("POST / bad csrf: %v", err)
+		t.Fatalf("POST /stores bad csrf: %v", err)
 	}
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("POST / bad csrf status = %d, want 403; body: %s", resp.StatusCode, body)
+		t.Fatalf("POST /stores bad csrf status = %d, want 403; body: %s", resp.StatusCode, body)
 	}
 
 	// Login without CSRF
@@ -625,5 +673,255 @@ func TestLoginAttemptLimitHTTP(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("POST /login over limit status = %d, want 429", resp.StatusCode)
+	}
+}
+
+func TestStoreIsolationAndPermissionsHTTP(t *testing.T) {
+	srv, db := testServer(t)
+	owner := newClient(t, srv)
+	signup(t, srv, db, owner, "owner@example.com", "password123")
+	storeID := createStore(t, srv, owner, "Owner store")
+
+	outsider := newClient(t, srv)
+	signup(t, srv, db, outsider, "other@example.com", "password123")
+
+	resp, err := outsider.Get(srv.URL + storePath(storeID, ""))
+	if err != nil {
+		t.Fatalf("outsider GET store: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("outsider GET store status = %d, want 404; body: %s", resp.StatusCode, body)
+	}
+
+	// Add an existing user as view, then as a second user as edit, via the owner members form.
+	viewUser, err := auth.CreateUser(db, "view@example.com", "password123")
+	if err != nil {
+		t.Fatalf("CreateUser view: %v", err)
+	}
+	editUser, err := auth.CreateUser(db, "edit@example.com", "password123")
+	if err != nil {
+		t.Fatalf("CreateUser edit: %v", err)
+	}
+	ownerRow, _, err := auth.UserByEmail(db, "owner@example.com")
+	if err != nil {
+		t.Fatalf("owner lookup: %v", err)
+	}
+	if err := fridge.AddMember(db, storeID, ownerRow.ID, viewUser.ID, fridge.PermView); err != nil {
+		t.Fatalf("AddMember view: %v", err)
+	}
+	if err := fridge.AddMember(db, storeID, ownerRow.ID, editUser.ID, fridge.PermEdit); err != nil {
+		t.Fatalf("AddMember edit: %v", err)
+	}
+
+	viewer := newClient(t, srv)
+	loginAs(t, srv, viewer, "view@example.com", "password123")
+	editor := newClient(t, srv)
+	loginAs(t, srv, editor, "edit@example.com", "password123")
+
+	resp, err = viewer.Get(srv.URL + storePath(storeID, ""))
+	if err != nil {
+		t.Fatalf("viewer GET: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("viewer GET status = %d; body: %s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "Add Item") {
+		t.Fatalf("viewer saw add form: %s", body)
+	}
+
+	token := csrfFromHTML(t, string(body))
+	resp, err = viewer.PostForm(srv.URL+storePath(storeID, ""), url.Values{
+		"csrf_token": {token},
+		"name":       {"Milk"},
+		"quantity":   {"1"},
+		"expiration": {"2026-11-17"},
+	})
+	if err != nil {
+		t.Fatalf("viewer POST add: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("viewer add status = %d, want 403; body: %s", resp.StatusCode, body)
+	}
+
+	token, _, status := getCSRF(t, editor, srv.URL+storePath(storeID, ""))
+	if status != http.StatusOK {
+		t.Fatalf("editor GET status = %d", status)
+	}
+	resp, err = editor.PostForm(srv.URL+storePath(storeID, ""), url.Values{
+		"csrf_token": {token},
+		"name":       {"Milk"},
+		"quantity":   {"1"},
+		"expiration": {"2026-11-17"},
+	})
+	if err != nil {
+		t.Fatalf("editor POST add: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("editor add status = %d, want 200 or 303; body: %s", resp.StatusCode, body)
+	}
+
+	// View and edit members cannot manage members.
+	resp, err = viewer.Get(srv.URL + storePath(storeID, "/members"))
+	if err != nil {
+		t.Fatalf("viewer GET members: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("viewer GET members status = %d, want 403", resp.StatusCode)
+	}
+	token, _, status = getCSRF(t, editor, srv.URL+storePath(storeID, ""))
+	if status != http.StatusOK {
+		t.Fatalf("editor GET for member csrf status = %d", status)
+	}
+	resp, err = editor.PostForm(srv.URL+storePath(storeID, "/members"), url.Values{
+		"csrf_token": {token},
+		"email":      {"someone@example.com"},
+		"permission": {"view"},
+	})
+	if err != nil {
+		t.Fatalf("editor POST members: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("editor POST members status = %d, want 403; body: %s", resp.StatusCode, body)
+	}
+
+	// Owner can open the members page.
+	resp, err = owner.Get(srv.URL + storePath(storeID, "/members"))
+	if err != nil {
+		t.Fatalf("owner GET members: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("owner GET members status = %d; body: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "view@example.com") {
+		t.Fatalf("owner members page missing viewer email, got: %s", body)
+	}
+}
+
+func loginAs(t *testing.T, srv *httptest.Server, client *http.Client, email, password string) {
+	t.Helper()
+	token, _, status := getCSRF(t, client, srv.URL+"/login")
+	if status != http.StatusOK {
+		t.Fatalf("GET /login status = %d", status)
+	}
+	resp, err := client.PostForm(srv.URL+"/login", url.Values{
+		"csrf_token": {token},
+		"email":      {email},
+		"password":   {password},
+	})
+	if err != nil {
+		t.Fatalf("POST /login %s: %v", email, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusSeeOther {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /login %s status = %d; body: %s", email, resp.StatusCode, b)
+	}
+}
+
+func TestStoreInviteCreatesAccountAndMembership(t *testing.T) {
+	srv, db := testServer(t)
+	owner := newClient(t, srv)
+	signup(t, srv, db, owner, "owner@example.com", "password123")
+	storeID := createStore(t, srv, owner, "Shared store")
+
+	token, body, status := getCSRF(t, owner, srv.URL+storePath(storeID, "/members"))
+	if status != http.StatusOK {
+		t.Fatalf("GET members status = %d; body: %s", status, body)
+	}
+	resp, err := owner.PostForm(srv.URL+storePath(storeID, "/members"), url.Values{
+		"csrf_token": {token},
+		"email":      {"new@example.com"},
+		"permission": {"edit"},
+	})
+	if err != nil {
+		t.Fatalf("POST share: %v", err)
+	}
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST share status = %d; body: %s", resp.StatusCode, bodyBytes)
+	}
+	m := regexp.MustCompile(`/signup\?token=([^"]+)`).FindStringSubmatch(string(bodyBytes))
+	if len(m) != 2 {
+		t.Fatalf("invite link missing from members page: %s", bodyBytes)
+	}
+	invite, err := url.QueryUnescape(m[1])
+	if err != nil {
+		t.Fatalf("unescape token: %v", err)
+	}
+
+	guest := newClient(t, srv)
+	csrf, _, status := getCSRF(t, guest, srv.URL+"/signup?token="+url.QueryEscape(invite))
+	if status != http.StatusOK {
+		t.Fatalf("GET /signup status = %d", status)
+	}
+	prev := guest.CheckRedirect
+	guest.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err = guest.PostForm(srv.URL+"/signup", url.Values{
+		"csrf_token": {csrf},
+		"token":      {invite},
+		"email":      {"new@example.com"},
+		"password":   {"password123"},
+	})
+	guest.CheckRedirect = prev
+	if err != nil {
+		t.Fatalf("POST /signup: %v", err)
+	}
+	bodyBytes, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST /signup status = %d, want 303; body: %s", resp.StatusCode, bodyBytes)
+	}
+	if loc := resp.Header.Get("Location"); loc != storePath(storeID, "") {
+		t.Fatalf("POST /signup Location = %q, want %s", loc, storePath(storeID, ""))
+	}
+
+	resp, err = guest.Get(srv.URL + storePath(storeID, ""))
+	if err != nil {
+		t.Fatalf("new member GET store: %v", err)
+	}
+	bodyBytes, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("new member GET store status = %d; body: %s", resp.StatusCode, bodyBytes)
+	}
+	if !strings.Contains(string(bodyBytes), "Add Item") {
+		t.Fatalf("edit member should see add form: %s", bodyBytes)
+	}
+
+	// Invite is single-use.
+	other := newClient(t, srv)
+	csrf, _, status = getCSRF(t, other, srv.URL+"/signup?token="+url.QueryEscape(invite))
+	if status != http.StatusOK {
+		t.Fatalf("GET /signup reused status = %d", status)
+	}
+	resp, err = other.PostForm(srv.URL+"/signup", url.Values{
+		"csrf_token": {csrf},
+		"token":      {invite},
+		"email":      {"another@example.com"},
+		"password":   {"password123"},
+	})
+	if err != nil {
+		t.Fatalf("POST /signup reused: %v", err)
+	}
+	bodyBytes, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusSeeOther {
+		t.Fatalf("reused store invite succeeded with status %d; body: %s", resp.StatusCode, bodyBytes)
 	}
 }

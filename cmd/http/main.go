@@ -3,13 +3,10 @@ package main
 import (
 	"database/sql"
 	"embed"
-	"encoding/json"
-	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,13 +16,6 @@ import (
 
 //go:embed templates/*.html
 var templateFS embed.FS
-
-type RenderFridge struct {
-	Items   []RenderItem
-	CSRF    string
-	Email   string
-	IsAdmin bool
-}
 
 type RenderItem struct {
 	ID             int
@@ -74,10 +64,19 @@ func newMux(db *sql.DB) http.Handler {
 	mux.HandleFunc("POST /logout", s.ensureCSRF(s.requireCSRFOnPost(s.logout)))
 	mux.HandleFunc("GET /admin/invites", s.requireAdmin(s.adminInvitesForm))
 	mux.HandleFunc("POST /admin/invites", s.requireAdmin(s.adminInvitesSubmit))
-	mux.HandleFunc("/", s.protectHTML(s.listAndAddHandler))
-	mux.HandleFunc("POST /remove", s.protectHTML(s.removeHandler))
-	mux.HandleFunc("GET /items", s.protectAPI(s.getItemsHandler))
-	mux.HandleFunc("POST /items", s.protectAPI(s.postItemsHandler))
+	mux.HandleFunc("GET /{$}", s.protectHTML(s.listStoresHandler))
+	mux.HandleFunc("POST /stores", s.protectHTML(s.createStoreHandler))
+	mux.HandleFunc("GET /stores/{id}", s.protectHTML(s.storePageHandler))
+	mux.HandleFunc("POST /stores/{id}", s.protectHTML(s.storePageHandler))
+	mux.HandleFunc("POST /stores/{id}/rename", s.protectHTML(s.renameStoreHandler))
+	mux.HandleFunc("POST /stores/{id}/delete", s.protectHTML(s.deleteStoreHandler))
+	mux.HandleFunc("POST /stores/{id}/items/remove", s.protectHTML(s.removeStoreItemHandler))
+	mux.HandleFunc("GET /stores/{id}/items", s.protectAPI(s.getStoreItemsAPI))
+	mux.HandleFunc("POST /stores/{id}/items", s.protectAPI(s.postStoreItemsAPI))
+	mux.HandleFunc("GET /stores/{id}/members", s.protectHTML(s.requireOwner(s.membersForm)))
+	mux.HandleFunc("POST /stores/{id}/members", s.protectHTML(s.requireOwner(s.membersShare)))
+	mux.HandleFunc("POST /stores/{id}/members/update", s.protectHTML(s.requireOwner(s.membersUpdate)))
+	mux.HandleFunc("POST /stores/{id}/members/remove", s.protectHTML(s.requireOwner(s.membersRemove)))
 	return mux
 }
 
@@ -108,124 +107,4 @@ func main() {
 	if err := http.ListenAndServe(addr, newMux(db)); err != nil {
 		log.Fatal("Server failed: ", err)
 	}
-}
-
-func (s *server) listAndAddHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		name := r.FormValue("name")
-		quantity := r.FormValue("quantity")
-		expiration := r.FormValue("expiration")
-
-		qty, err := strconv.ParseFloat(quantity, 64)
-		if err != nil {
-			http.Error(w, "Invalid quantity", http.StatusBadRequest)
-			return
-		}
-
-		expirationDate, err := time.Parse(fridge.DateFormat, expiration)
-		if err != nil {
-			http.Error(w, "Invalid expiraiton time", http.StatusBadRequest)
-			return
-		}
-
-		item := fridge.Item{
-			Name:           name,
-			Quantity:       qty,
-			ExpirationDate: expirationDate,
-		}
-
-		id, err := s.fridge.AddItem(s.db, item.Name, item.Quantity, item.ExpirationDate)
-		if err != nil {
-			http.Error(w, "Error with storing item", http.StatusBadRequest)
-			return
-		}
-
-		log.Println("added item to fridge:")
-		item, err = s.fridge.GetItemByID(s.db, id)
-		if err != nil {
-			http.Error(w, "Error with getting new item", http.StatusBadRequest)
-			return
-		}
-		log.Print(item.LogString())
-	}
-
-	items, err := s.fridge.ListItems(s.db)
-	if err != nil {
-		http.Error(w, "Unable to get items", http.StatusInternalServerError)
-		log.Println("Error getting items", err)
-		return
-	}
-
-	data := RenderFridge{Items: toRenderItems(items), CSRF: s.csrfToken(r)}
-	if u, ok := userFrom(r); ok {
-		data.Email = u.Email
-		data.IsAdmin = u.IsAdmin
-	}
-
-	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
-		http.Error(w, "Unable to render template", http.StatusInternalServerError)
-		log.Println("Error rendering template:", err)
-	}
-}
-
-func (s *server) removeHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := r.FormValue("id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		http.Error(w, "Unable to get item to remove", http.StatusBadRequest)
-		log.Println("Unable to remove item", err)
-		return
-	}
-
-	if err := s.fridge.RemoveItem(s.db, id); err != nil {
-		http.Error(w, "Unable to remove item", http.StatusInternalServerError)
-		log.Println("Unable to remove item", err)
-		return
-	}
-	log.Printf("removed item %03d\n", id)
-
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-func (s *server) getItemsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	items, err := s.fridge.ListItems(s.db)
-	if err != nil {
-		http.Error(w, "Unable to get items", http.StatusInternalServerError)
-		log.Println("Error getting items", err)
-		return
-	}
-
-	if err := json.NewEncoder(w).Encode(items); err != nil {
-		http.Error(w, "Failed to encode items to JSON", http.StatusInternalServerError)
-	}
-}
-
-func (s *server) postItemsHandler(w http.ResponseWriter, r *http.Request) {
-	var item fridge.Item
-	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
-		http.Error(w, "Invalid JSON data", http.StatusBadRequest)
-		return
-	}
-
-	id, err := s.fridge.AddItem(s.db, item.Name, item.Quantity, item.ExpirationDate)
-	if err != nil {
-		http.Error(w, "Error adding item", http.StatusInternalServerError)
-		log.Println("Error adding item", err)
-		return
-	}
-
-	log.Println("added item to fridge")
-	dbItem, err := s.fridge.GetItemByID(s.db, id)
-	if err != nil {
-		log.Println("Error getting items", err)
-		http.Error(w, "Unable to get items", http.StatusInternalServerError)
-		return
-	}
-	log.Println(dbItem.LogString())
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"message": "Item added successfully"}`)
 }

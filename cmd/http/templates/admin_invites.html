@@ -6,9 +6,9 @@
     <title>Sign-up invites — Fridge Manager</title>
 </head>
 <body>
-    <p><a href="/">Back to the fridge</a></p>
+    <p><a href="/">Back to stores</a></p>
     <h1>Sign-up invites</h1>
-    <p>Only admins can create links for new accounts. Fridge-join invites are separate and are not managed here.</p>
+    <p>Only admins can create links for new accounts. Store-sharing invites are created by a store owner on that store's members page.</p>
     {{if .Error}}<p>{{.Error}}</p>{{end}}
     {{if .InviteURL}}
     <p>Invite created (expires {{.Expires}}):</p>

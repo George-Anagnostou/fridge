@@ -17,6 +17,7 @@ func allMigrations() []migration {
 		{2, "users_sessions_invites", migrate002UsersSessionsInvites},
 		{3, "user_admin_and_invite_meta", migrate003UserAdminAndInviteMeta},
 		{4, "login_attempts", migrate004LoginAttempts},
+		{5, "stores_and_item_scope", migrate005StoresAndItemScope},
 	}
 }
 
@@ -182,4 +183,80 @@ func migrate004LoginAttempts(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+const DefaultStoreName = "My store"
+
+func migrate005StoresAndItemScope(db *sql.DB) error {
+	stmts := []string{
+		`CREATE TABLE stores (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			owner_id INTEGER NOT NULL REFERENCES users(id),
+			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+		)`,
+		`CREATE TABLE store_members (
+			store_id INTEGER NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			permission TEXT NOT NULL CHECK (permission IN ('view', 'edit')),
+			PRIMARY KEY (store_id, user_id)
+		)`,
+		`ALTER TABLE fridge ADD COLUMN store_id INTEGER REFERENCES stores(id)`,
+		`CREATE INDEX idx_fridge_store_id ON fridge (store_id)`,
+		`ALTER TABLE invites ADD COLUMN store_id INTEGER REFERENCES stores(id)`,
+		`ALTER TABLE invites ADD COLUMN store_permission TEXT`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
+	var ownerID int64
+	err := db.QueryRow(`SELECT id FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1`).Scan(&ownerID)
+	if err != nil {
+		err = db.QueryRow(`SELECT id FROM users ORDER BY id ASC LIMIT 1`).Scan(&ownerID)
+	}
+	if err != nil {
+		// No users yet. Existing items stay unassigned until the first
+		// account is created; ClaimOrphanItems then moves them.
+		return nil
+	}
+	return assignOrphanItems(db, ownerID)
+}
+
+func assignOrphanItems(db execer, ownerID int64) error {
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM fridge WHERE store_id IS NULL`).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return nil
+	}
+	res, err := db.Exec(`INSERT INTO stores (name, owner_id) VALUES (?, ?)`, DefaultStoreName, ownerID)
+	if err != nil {
+		return err
+	}
+	storeID, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`UPDATE fridge SET store_id = ? WHERE store_id IS NULL`, storeID)
+	return err
+}
+
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// ClaimOrphanItems moves items that have no store into a default store
+// owned by userID. It is a no-op when there are no such items. Used when
+// the first account is created after a pre-user database was migrated.
+func ClaimOrphanItems(db *sql.DB, userID int64) error {
+	return assignOrphanItems(db, userID)
+}
+
+func ClaimOrphanItemsTx(tx *sql.Tx, userID int64) error {
+	return assignOrphanItems(tx, userID)
 }
