@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/George-Anagnostou/fridge/auth"
 	"github.com/George-Anagnostou/fridge/fridge"
 )
 
@@ -20,7 +21,10 @@ import (
 var templateFS embed.FS
 
 type RenderFridge struct {
-	Items []RenderItem
+	Items   []RenderItem
+	CSRF    string
+	Email   string
+	IsAdmin bool
 }
 
 type RenderItem struct {
@@ -48,28 +52,48 @@ func toRenderItems(items []fridge.Item) []RenderItem {
 var tmpl = template.Must(template.ParseFS(templateFS, "templates/*.html"))
 
 type server struct {
-	db     *sql.DB
-	fridge fridge.Fridge
-	tmpl   *template.Template
+	db           *sql.DB
+	fridge       fridge.Fridge
+	tmpl         *template.Template
+	cookieSecure bool
+	sessionTTL   time.Duration
 }
 
 func newMux(db *sql.DB) http.Handler {
-	s := &server{db: db, tmpl: tmpl}
+	s := &server{
+		db:           db,
+		tmpl:         tmpl,
+		cookieSecure: cookieSecureFromEnv(),
+		sessionTTL:   auth.DefaultSessionTTL,
+	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.listAndAddHandler)
-	mux.HandleFunc("POST /remove", s.removeHandler)
-	mux.HandleFunc("GET /items", s.getItemsHandler)
-	mux.HandleFunc("POST /items", s.postItemsHandler)
+	mux.HandleFunc("GET /login", s.ensureCSRF(s.loginForm))
+	mux.HandleFunc("POST /login", s.ensureCSRF(s.requireCSRFOnPost(s.loginSubmit)))
+	mux.HandleFunc("GET /signup", s.ensureCSRF(s.signupForm))
+	mux.HandleFunc("POST /signup", s.ensureCSRF(s.requireCSRFOnPost(s.signupSubmit)))
+	mux.HandleFunc("POST /logout", s.ensureCSRF(s.requireCSRFOnPost(s.logout)))
+	mux.HandleFunc("GET /admin/invites", s.requireAdmin(s.adminInvitesForm))
+	mux.HandleFunc("POST /admin/invites", s.requireAdmin(s.adminInvitesSubmit))
+	mux.HandleFunc("/", s.protectHTML(s.listAndAddHandler))
+	mux.HandleFunc("POST /remove", s.protectHTML(s.removeHandler))
+	mux.HandleFunc("GET /items", s.protectAPI(s.getItemsHandler))
+	mux.HandleFunc("POST /items", s.protectAPI(s.postItemsHandler))
 	return mux
 }
 
+// listenAddr is 127.0.0.1:8080 by default so the process is not reachable
+// around nginx. FRIDGE_ADDR, if set, is the full listen address. PORT still
+// changes the port, but keeps the loopback host.
 func listenAddr() string {
-	port := os.Getenv("PORT")
+	if addr := strings.TrimSpace(os.Getenv("FRIDGE_ADDR")); addr != "" {
+		return addr
+	}
+	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
 		port = "8080"
 	}
 	port = strings.TrimPrefix(port, ":")
-	return ":" + port
+	return "127.0.0.1:" + port
 }
 
 func main() {
@@ -132,7 +156,11 @@ func (s *server) listAndAddHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := RenderFridge{Items: toRenderItems(items)}
+	data := RenderFridge{Items: toRenderItems(items), CSRF: s.csrfToken(r)}
+	if u, ok := userFrom(r); ok {
+		data.Email = u.Email
+		data.IsAdmin = u.IsAdmin
+	}
 
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		http.Error(w, "Unable to render template", http.StatusInternalServerError)

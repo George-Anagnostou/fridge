@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign-up invites — Fridge Manager</title>
+</head>
+<body>
+    <p><a href="/">Back to the fridge</a></p>
+    <h1>Sign-up invites</h1>
+    <p>Only admins can create links for new accounts. Fridge-join invites are separate and are not managed here.</p>
+    {{if .Error}}<p>{{.Error}}</p>{{end}}
+    {{if .InviteURL}}
+    <p>Invite created (expires {{.Expires}}):</p>
+    <p><a href="{{.InviteURL}}">{{.InviteURL}}</a></p>
+    {{end}}
+    <form action="/admin/invites" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <button type="submit">Create a sign-up invite</button>
+    </form>
+</body>
+</html>
