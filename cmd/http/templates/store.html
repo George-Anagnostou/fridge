@@ -1,119 +1,139 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{template "head"}}
     <title>{{.Store.Name}} — Fridge Manager</title>
 </head>
 <body>
-    <p><a href="/">All stores</a></p>
+<div class="wrap">
+    <header class="top">
+        <a class="brand" href="/">Fridge</a>
+        {{if .Email}}
+        <div class="who">
+            <span>{{.Email}}</span>
+            {{if .IsAdmin}}<a href="/admin/invites">Invites</a>{{end}}
+            {{if .IsOwner}}<a href="/stores/{{.Store.ID}}/members">Members</a>{{end}}
+            <form action="/logout" method="POST">
+                <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+                <button type="submit" class="btn-quiet">Log out</button>
+            </form>
+        </div>
+        {{end}}
+    </header>
+    <p class="crumb"><a href="/">All stores</a></p>
     <h1>{{.Store.Name}}</h1>
-    {{if .Email}}
-    <p>
-        Signed in as {{.Email}}
-        {{if .IsAdmin}} · <a href="/admin/invites">Sign-up invites</a>{{end}}
-        {{if .IsOwner}} · <a href="/stores/{{.Store.ID}}/members">Members</a>{{end}}
-        <form action="/logout" method="POST" style="display:inline;">
-            <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-            <button type="submit">Log out</button>
-        </form>
-    </p>
-    {{end}}
-
-    {{if .Error}}<p>{{.Error}}</p>{{end}}
-
-    {{if .IsOwner}}
-    <form action="/stores/{{.Store.ID}}/rename" method="POST">
-        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-        <label for="rename">Rename:</label>
-        <input type="text" id="rename" name="name" value="{{.Store.Name}}" required>
-        <button type="submit">Save name</button>
-    </form>
-    <form action="/stores/{{.Store.ID}}/delete" method="POST">
-        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-        <button type="submit">Delete store</button>
-    </form>
-    {{end}}
+    {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 
     {{if .CanEdit}}
     <h2>Add item</h2>
-    <form action="/stores/{{.Store.ID}}" method="POST">
+    <form class="stack" action="/stores/{{.Store.ID}}" method="POST">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-        <label for="name">Item Name:</label>
-        <input type="text" id="name" name="name" required>
-        <br>
-        <label for="quantity">Quantity:</label>
-        <input type="number" id="quantity" name="quantity" min="0" step="any" required>
-        <br>
-        <label for="expiration">Expiration Date (yyyy-mm-dd):</label>
-        <input type="date" id="expiration" name="expiration" required>
-        <br>
-        <label for="barcode">Barcode:</label>
-        <input type="text" id="barcode" name="barcode">
-        <br>
-        <label for="brand">Brand:</label>
-        <input type="text" id="brand" name="brand">
-        <br>
-        <label for="serving_size">Serving size:</label>
-        <input type="text" id="serving_size" name="serving_size">
-        <br>
-        <label for="calories">Calories:</label>
-        <input type="number" id="calories" name="calories" min="0" step="any">
-        <br>
-        <label for="protein_g">Protein (g):</label>
-        <input type="number" id="protein_g" name="protein_g" min="0" step="any">
-        <br>
-        <label for="carbs_g">Carbs (g):</label>
-        <input type="number" id="carbs_g" name="carbs_g" min="0" step="any">
-        <br>
-        <label for="fat_g">Fat (g):</label>
-        <input type="number" id="fat_g" name="fat_g" min="0" step="any">
-        <br>
-        <button type="submit">Add Item</button>
+        <label for="name">Item name</label>
+        <input type="text" id="name" name="name" autocomplete="off" enterkeyhint="next" autofocus required>
+        <div class="row">
+            <div>
+                <label for="quantity">Quantity</label>
+                <input type="number" id="quantity" name="quantity" min="0" step="any" value="1" inputmode="decimal" required>
+            </div>
+            <div>
+                <label for="expiration">Expires</label>
+                <input type="date" id="expiration" name="expiration" required>
+            </div>
+        </div>
+        <details>
+            <summary>Optional details</summary>
+            <label for="barcode">Barcode</label>
+            <input type="text" id="barcode" name="barcode" inputmode="numeric" autocomplete="off">
+            <label for="brand">Brand</label>
+            <input type="text" id="brand" name="brand" autocomplete="off">
+            <label for="serving_size">Serving size</label>
+            <input type="text" id="serving_size" name="serving_size" autocomplete="off">
+            <div class="row">
+                <div>
+                    <label for="calories">Calories</label>
+                    <input type="number" id="calories" name="calories" min="0" step="any" inputmode="decimal">
+                </div>
+                <div>
+                    <label for="protein_g">Protein (g)</label>
+                    <input type="number" id="protein_g" name="protein_g" min="0" step="any" inputmode="decimal">
+                </div>
+            </div>
+            <div class="row">
+                <div>
+                    <label for="carbs_g">Carbs (g)</label>
+                    <input type="number" id="carbs_g" name="carbs_g" min="0" step="any" inputmode="decimal">
+                </div>
+                <div>
+                    <label for="fat_g">Fat (g)</label>
+                    <input type="number" id="fat_g" name="fat_g" min="0" step="any" inputmode="decimal">
+                </div>
+            </div>
+        </details>
+        <button type="submit">Add item</button>
     </form>
     {{end}}
 
     <h2>Use soon</h2>
-    <p>Expired items first, then items expiring within {{.UseSoonDays}} days.</p>
-    <ol>
+    <p class="muted">Expired items first, then items expiring within {{.UseSoonDays}} days.</p>
+    <ol class="list use-soon">
     {{range .UseSoon}}
-        <li>
-            {{if .Expired}}Expired: {{end}}{{.Name}} - Quantity: {{.Quantity}} - Expires on {{.ExpirationDate}}
-            {{if .Brand}} — {{.Brand}}{{end}}
-            {{if .Barcode}} ({{.Barcode}}){{end}}
+        <li class="{{if .Expired}}expired{{end}}">
+            {{if .Expired}}<span class="badge">Expired</span>{{end}}
+            <span class="item-name">{{.Name}}</span>
+            <p class="meta">Qty {{.Quantity}} · Expires {{.ExpirationDate}}{{if .Brand}} · {{.Brand}}{{end}}{{if .Barcode}} · {{.Barcode}}{{end}}</p>
             {{if $.CanEdit}}
-            <a href="/stores/{{$.Store.ID}}/items/{{.ID}}/edit">Edit</a>
-            <form action="/stores/{{$.Store.ID}}/items/remove" method="POST" style="display:inline;">
-                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-                <input type="hidden" name="id" value="{{.ID}}">
-                <button type="submit">Remove</button>
-            </form>
+            <div class="actions">
+                <a class="btn btn-quiet" href="/stores/{{$.Store.ID}}/items/{{.ID}}/edit">Edit</a>
+                <form action="/stores/{{$.Store.ID}}/items/remove" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                    <input type="hidden" name="id" value="{{.ID}}">
+                    <button type="submit" class="btn-danger">Remove</button>
+                </form>
+            </div>
             {{end}}
         </li>
     {{else}}
-        <li>Nothing to use soon.</li>
+        <li class="empty">Nothing to use soon.</li>
     {{end}}
     </ol>
 
     <h2>Items</h2>
-    <ol>
+    <ol class="list">
     {{range .Items}}
         <li>
-            {{.Name}} - Quantity: {{.Quantity}} - Expires on {{.ExpirationDate}}
-            {{if .Brand}} — {{.Brand}}{{end}}
-            {{if .Barcode}} ({{.Barcode}}){{end}}
+            <span class="item-name">{{.Name}}</span>
+            <p class="meta">Qty {{.Quantity}} · Expires {{.ExpirationDate}}{{if .Brand}} · {{.Brand}}{{end}}{{if .Barcode}} · {{.Barcode}}{{end}}</p>
             {{if $.CanEdit}}
-            <a href="/stores/{{$.Store.ID}}/items/{{.ID}}/edit">Edit</a>
-            <form action="/stores/{{$.Store.ID}}/items/remove" method="POST" style="display:inline;">
-                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-                <input type="hidden" name="id" value="{{.ID}}">
-                <button type="submit">Remove</button>
-            </form>
+            <div class="actions">
+                <a class="btn btn-quiet" href="/stores/{{$.Store.ID}}/items/{{.ID}}/edit">Edit</a>
+                <form action="/stores/{{$.Store.ID}}/items/remove" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                    <input type="hidden" name="id" value="{{.ID}}">
+                    <button type="submit" class="btn-danger">Remove</button>
+                </form>
+            </div>
             {{end}}
         </li>
     {{else}}
-        <li>No other items in this store.</li>
+        <li class="empty">No other items in this store.</li>
     {{end}}
     </ol>
+
+    {{if .IsOwner}}
+    <details>
+        <summary>Store settings</summary>
+        <form class="stack" action="/stores/{{.Store.ID}}/rename" method="POST">
+            <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+            <label for="rename">Rename</label>
+            <input type="text" id="rename" name="name" value="{{.Store.Name}}" required>
+            <button type="submit">Save name</button>
+        </form>
+        <form action="/stores/{{.Store.ID}}/delete" method="POST">
+            <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+            <button type="submit" class="btn-danger btn-block">Delete store</button>
+        </form>
+    </details>
+    {{end}}
+</div>
 </body>
 </html>

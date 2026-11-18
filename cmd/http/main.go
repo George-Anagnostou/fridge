@@ -18,6 +18,9 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
+//go:embed static/*
+var staticFS embed.FS
+
 type RenderItem struct {
 	ID             int
 	Name           string
@@ -88,6 +91,7 @@ func newMux(db *sql.DB) http.Handler {
 		sessionTTL:   auth.DefaultSessionTTL,
 	}
 	mux := http.NewServeMux()
+	mux.Handle("GET /static/", http.FileServer(http.FS(staticFS)))
 	mux.HandleFunc("GET /login", s.ensureCSRF(s.loginForm))
 	mux.HandleFunc("POST /login", s.ensureCSRF(s.requireCSRFOnPost(s.loginSubmit)))
 	mux.HandleFunc("GET /signup", s.ensureCSRF(s.signupForm))
