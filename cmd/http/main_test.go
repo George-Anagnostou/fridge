@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,8 +35,20 @@ func testDB(t *testing.T) *sql.DB {
 
 func testServer(t *testing.T) (*httptest.Server, *sql.DB) {
 	t.Helper()
+	return testServerSetup(t, nil)
+}
+
+// testServerSetup builds a test server without the production OFF client so
+// tests never make live external calls. Use setup to inject a httptest-backed
+// source when a test needs to exercise a fetch.
+func testServerSetup(t *testing.T, setup func(*server)) (*httptest.Server, *sql.DB) {
+	t.Helper()
 	db := testDB(t)
-	srv := httptest.NewServer(newMux(db))
+	s := newServer(db)
+	if setup != nil {
+		setup(s)
+	}
+	srv := httptest.NewServer(s.handler())
 	t.Cleanup(srv.Close)
 	return srv, db
 }
@@ -1405,4 +1418,145 @@ type lookupTestSource struct {
 func (s lookupTestSource) Lookup(_ context.Context, barcode string) (lookup.Result, error) {
 	s.res.Product.Barcode = barcode
 	return s.res, nil
+}
+
+func TestLookupFetchesOFFOnMiss(t *testing.T) {
+	const code = "1234567890123"
+	var hits atomic.Int32
+	off := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if r.URL.Path != "/api/v3/product/"+code {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"product": map[string]any{
+				"product_name": "Yogurt",
+				"brands":       "Cultured",
+				"serving_size": "170 g",
+				"nutriments": map[string]any{
+					"energy-kcal_serving":   120.0,
+					"proteins_serving":      10.0,
+					"carbohydrates_serving": 15.0,
+					"fat_serving":           3.0,
+				},
+			},
+		})
+	}))
+	t.Cleanup(off.Close)
+
+	srv, db := testServerSetup(t, func(s *server) {
+		s.off = lookup.NewOFFClient(off.URL, lookup.DefaultUserAgent, off.Client())
+	})
+	client := newClient(t, srv)
+	signup(t, srv, db, client, "user@example.com", "password123")
+
+	resp, err := client.Get(srv.URL + "/lookup?barcode=" + code)
+	if err != nil {
+		t.Fatalf("GET /lookup: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", resp.StatusCode, body)
+	}
+	var got lookup.Product
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v; body: %s", err, body)
+	}
+	if got.Name != "Yogurt" || got.Brand != "Cultured" || got.Source != lookup.SourceOFF {
+		t.Fatalf("product = %+v", got)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("OFF hits = %d, want 1", hits.Load())
+	}
+
+	resp, err = client.Get(srv.URL + "/lookup?barcode=" + code)
+	if err != nil {
+		t.Fatalf("cached GET /lookup: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || hits.Load() != 1 {
+		t.Fatalf("cached status = %d hits = %d, want 200 and 1", resp.StatusCode, hits.Load())
+	}
+}
+
+func TestLookupOFF404IsCachedMiss(t *testing.T) {
+	var hits atomic.Int32
+	off := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"status":"failure"}`))
+	}))
+	t.Cleanup(off.Close)
+
+	srv, db := testServerSetup(t, func(s *server) {
+		s.off = lookup.NewOFFClient(off.URL, lookup.DefaultUserAgent, off.Client())
+	})
+	client := newClient(t, srv)
+	signup(t, srv, db, client, "user@example.com", "password123")
+
+	resp, err := client.Get(srv.URL + "/lookup?barcode=00000001")
+	if err != nil {
+		t.Fatalf("GET /lookup: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	resp, err = client.Get(srv.URL + "/lookup?barcode=00000001")
+	if err != nil {
+		t.Fatalf("cached miss: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound || hits.Load() != 1 {
+		t.Fatalf("cached miss status=%d hits=%d, want 404 and 1", resp.StatusCode, hits.Load())
+	}
+}
+
+func TestLookupOFF429NotCached(t *testing.T) {
+	var hits atomic.Int32
+	off := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(off.Close)
+
+	srv, db := testServerSetup(t, func(s *server) {
+		s.off = lookup.NewOFFClient(off.URL, lookup.DefaultUserAgent, off.Client())
+	})
+	client := newClient(t, srv)
+	signup(t, srv, db, client, "user@example.com", "password123")
+
+	resp, err := client.Get(srv.URL + "/lookup?barcode=12345678")
+	if err != nil {
+		t.Fatalf("GET /lookup: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", resp.StatusCode)
+	}
+	resp, err = client.Get(srv.URL + "/lookup?barcode=12345678")
+	if err != nil {
+		t.Fatalf("second GET /lookup: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests || hits.Load() != 2 {
+		t.Fatalf("second status=%d hits=%d, want 429 and 2 (not cached)", resp.StatusCode, hits.Load())
+	}
+}
+
+func TestStorePageHasODbLCredit(t *testing.T) {
+	srv, db := testServer(t)
+	client := newClient(t, srv)
+	signup(t, srv, db, client, "user@example.com", "password123")
+	storeID := createStore(t, srv, client, "Home")
+	_, body, status := getCSRF(t, client, srv.URL+storePath(storeID, ""))
+	if status != http.StatusOK {
+		t.Fatalf("GET store status = %d", status)
+	}
+	if !strings.Contains(body, "Open Food Facts") || !strings.Contains(body, "Open Database License") {
+		t.Fatalf("store page missing ODbL credit: %s", body)
+	}
 }

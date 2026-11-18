@@ -28,6 +28,7 @@ type Product struct {
 	ProteinG    *float64 `json:"protein_g,omitempty"`
 	CarbsG      *float64 `json:"carbs_g,omitempty"`
 	FatG        *float64 `json:"fat_g,omitempty"`
+	Source      string   `json:"source,omitempty"`
 }
 
 // Result is a cacheable lookup outcome. Found is false for a definitive miss.
