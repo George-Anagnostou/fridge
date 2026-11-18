@@ -26,46 +26,53 @@
 
     {{if .CanEdit}}
     <h2>Add item</h2>
-    <form class="stack" action="/stores/{{.Store.ID}}" method="POST">
+    <form id="add-item" class="stack" action="/stores/{{.Store.ID}}" method="POST">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
         <label for="name">Item name</label>
-        <input type="text" id="name" name="name" autocomplete="off" enterkeyhint="next" autofocus required>
+        <input type="text" id="name" name="name" value="{{.Prefill.Name}}" autocomplete="off" enterkeyhint="next" autofocus required>
         <div class="row">
             <div>
                 <label for="quantity">Quantity</label>
-                <input type="number" id="quantity" name="quantity" min="0" step="any" value="1" inputmode="decimal" required>
+                <input type="number" id="quantity" name="quantity" min="0" step="any" value="{{.Prefill.Quantity}}" inputmode="decimal" required>
             </div>
             <div>
                 <label for="expiration">Expires</label>
                 <input type="date" id="expiration" name="expiration" required>
             </div>
         </div>
-        <details>
+        <details{{if .Prefill.OpenDetails}} open{{end}}>
             <summary>Optional details</summary>
             <label for="barcode">Barcode</label>
-            <input type="text" id="barcode" name="barcode" inputmode="numeric" autocomplete="off">
+            <div class="barcode-row">
+                <input type="text" id="barcode" name="barcode" value="{{.Prefill.Barcode}}" inputmode="numeric" autocomplete="off">
+                <button type="submit" class="btn-quiet" id="lookup-barcode" formmethod="get" formaction="/stores/{{.Store.ID}}" formnovalidate>Look up</button>
+                <button type="button" class="btn-quiet" id="scan-barcode" hidden>Scan</button>
+            </div>
+            <p class="muted" id="scan-note">The camera needs HTTPS or localhost. You can also type a barcode and look it up.</p>
+            <div id="reader" class="scanner" hidden></div>
+            {{if .LookupMsg}}<p id="lookup-status" class="muted">{{.LookupMsg}}</p>{{else}}<p id="lookup-status" class="muted"></p>{{end}}
             <label for="brand">Brand</label>
-            <input type="text" id="brand" name="brand" autocomplete="off">
+            <input type="text" id="brand" name="brand" value="{{.Prefill.Brand}}" autocomplete="off">
             <label for="serving_size">Serving size</label>
-            <input type="text" id="serving_size" name="serving_size" autocomplete="off">
+            <input type="text" id="serving_size" name="serving_size" value="{{.Prefill.ServingSize}}" autocomplete="off">
             <div class="row">
                 <div>
                     <label for="calories">Calories</label>
-                    <input type="number" id="calories" name="calories" min="0" step="any" inputmode="decimal">
+                    <input type="number" id="calories" name="calories" min="0" step="any" value="{{.Prefill.Calories}}" inputmode="decimal">
                 </div>
                 <div>
                     <label for="protein_g">Protein (g)</label>
-                    <input type="number" id="protein_g" name="protein_g" min="0" step="any" inputmode="decimal">
+                    <input type="number" id="protein_g" name="protein_g" min="0" step="any" value="{{.Prefill.ProteinG}}" inputmode="decimal">
                 </div>
             </div>
             <div class="row">
                 <div>
                     <label for="carbs_g">Carbs (g)</label>
-                    <input type="number" id="carbs_g" name="carbs_g" min="0" step="any" inputmode="decimal">
+                    <input type="number" id="carbs_g" name="carbs_g" min="0" step="any" value="{{.Prefill.CarbsG}}" inputmode="decimal">
                 </div>
                 <div>
                     <label for="fat_g">Fat (g)</label>
-                    <input type="number" id="fat_g" name="fat_g" min="0" step="any" inputmode="decimal">
+                    <input type="number" id="fat_g" name="fat_g" min="0" step="any" value="{{.Prefill.FatG}}" inputmode="decimal">
                 </div>
             </div>
             <p class="credit muted">Product details may come from <a href="https://world.openfoodfacts.org">Open Food Facts</a> and are available under the <a href="https://opendatacommons.org/licenses/odbl/1.0/">Open Database License</a>.</p>
@@ -136,5 +143,9 @@
     </details>
     {{end}}
 </div>
+{{if .CanEdit}}
+<script src="/static/vendor/html5-qrcode/html5-qrcode.min.js" defer></script>
+<script src="/static/scan.js" defer></script>
+{{end}}
 </body>
 </html>
