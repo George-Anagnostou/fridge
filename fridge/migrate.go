@@ -19,6 +19,7 @@ func allMigrations() []migration {
 		{4, "login_attempts", migrate004LoginAttempts},
 		{5, "stores_and_item_scope", migrate005StoresAndItemScope},
 		{6, "item_details", migrate006ItemDetails},
+		{7, "lookup_cache", migrate007LookupCache},
 	}
 }
 
@@ -278,4 +279,17 @@ func migrate006ItemDetails(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+func migrate007LookupCache(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE lookup_cache (
+			barcode TEXT NOT NULL,
+			source TEXT NOT NULL CHECK (source IN ('off', 'usda')),
+			payload TEXT,
+			found INTEGER NOT NULL,
+			fetched_at TEXT NOT NULL,
+			PRIMARY KEY (barcode, source)
+		)`)
+	return err
 }

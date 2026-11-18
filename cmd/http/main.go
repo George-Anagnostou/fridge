@@ -99,6 +99,7 @@ func newMux(db *sql.DB) http.Handler {
 	mux.HandleFunc("POST /logout", s.ensureCSRF(s.requireCSRFOnPost(s.logout)))
 	mux.HandleFunc("GET /admin/invites", s.requireAdmin(s.adminInvitesForm))
 	mux.HandleFunc("POST /admin/invites", s.requireAdmin(s.adminInvitesSubmit))
+	mux.HandleFunc("GET /lookup", s.protectAPI(s.lookupHandler))
 	mux.HandleFunc("GET /{$}", s.protectHTML(s.listStoresHandler))
 	mux.HandleFunc("POST /stores", s.protectHTML(s.createStoreHandler))
 	mux.HandleFunc("GET /stores/{id}", s.protectHTML(s.storePageHandler))

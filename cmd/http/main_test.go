@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/George-Anagnostou/fridge/auth"
 	"github.com/George-Anagnostou/fridge/fridge"
+	"github.com/George-Anagnostou/fridge/lookup"
 )
 
 func testDB(t *testing.T) *sql.DB {
@@ -1335,4 +1337,72 @@ func TestMobileItemFormPosts(t *testing.T) {
 	if strings.Contains(body, "Greek Yogurt") {
 		t.Fatalf("removed item still listed: %s", body)
 	}
+}
+
+func TestLookupCacheOnly(t *testing.T) {
+	srv, db := testServer(t)
+	anon := newClient(t, srv)
+	resp, err := anon.Get(srv.URL + "/lookup?barcode=12345678")
+	if err != nil {
+		t.Fatalf("anon GET /lookup: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anon GET /lookup status = %d, want 401", resp.StatusCode)
+	}
+
+	client := newClient(t, srv)
+	signup(t, srv, db, client, "user@example.com", "password123")
+
+	resp, err = client.Get(srv.URL + "/lookup?barcode=abc")
+	if err != nil {
+		t.Fatalf("invalid barcode: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid barcode status = %d, want 400; body: %s", resp.StatusCode, body)
+	}
+
+	resp, err = client.Get(srv.URL + "/lookup?barcode=12345678")
+	if err != nil {
+		t.Fatalf("cache miss: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cache miss status = %d, want 404; body: %s", resp.StatusCode, body)
+	}
+
+	cache := lookup.NewCache(db)
+	src := lookupTestSource{res: lookup.Result{Found: true, Product: lookup.Product{Name: "Milk", Brand: "Dairy Co"}}}
+	if _, err := cache.GetOrFetch(context.Background(), "1234-5678", lookup.SourceOFF, src); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	resp, err = client.Get(srv.URL + "/lookup?barcode=1234-5678")
+	if err != nil {
+		t.Fatalf("cache hit: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("cache hit status = %d; body: %s", resp.StatusCode, body)
+	}
+	var got lookup.Product
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v; body: %s", err, body)
+	}
+	if got.Barcode != "12345678" || got.Name != "Milk" || got.Brand != "Dairy Co" {
+		t.Fatalf("lookup product = %+v", got)
+	}
+}
+
+type lookupTestSource struct {
+	res lookup.Result
+}
+
+func (s lookupTestSource) Lookup(_ context.Context, barcode string) (lookup.Result, error) {
+	s.res.Product.Barcode = barcode
+	return s.res, nil
 }

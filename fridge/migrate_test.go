@@ -9,7 +9,7 @@ import (
 func TestMigrateFreshDB(t *testing.T) {
 	db := openTempDB(t)
 
-	for _, table := range []string{"fridge", "schema_migrations", "users", "sessions", "invites", "login_attempts", "stores", "store_members"} {
+	for _, table := range []string{"fridge", "schema_migrations", "users", "sessions", "invites", "login_attempts", "stores", "store_members", "lookup_cache"} {
 		ok, err := tableExists(db, table)
 		if err != nil {
 			t.Fatalf("tableExists(%q): %v", table, err)
@@ -23,8 +23,8 @@ func TestMigrateFreshDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("appliedMigrationIDs: %v", err)
 	}
-	if !ids[1] || !ids[2] || !ids[3] || !ids[4] || !ids[5] || !ids[6] {
-		t.Fatalf("applied migrations = %v, want 1-6", ids)
+	if !ids[1] || !ids[2] || !ids[3] || !ids[4] || !ids[5] || !ids[6] || !ids[7] {
+		t.Fatalf("applied migrations = %v, want 1-7", ids)
 	}
 
 	// Re-running InitDB/Migrate is a no-op and keeps data.
@@ -116,8 +116,8 @@ func TestMigrateLegacyDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("appliedMigrationIDs: %v", err)
 	}
-	if !ids[1] || !ids[2] || !ids[3] || !ids[4] || !ids[5] || !ids[6] {
-		t.Fatalf("applied migrations = %v, want 1 (stamped) through 6", ids)
+	if !ids[1] || !ids[2] || !ids[3] || !ids[4] || !ids[5] || !ids[6] || !ids[7] {
+		t.Fatalf("applied migrations = %v, want 1 (stamped) through 7", ids)
 	}
 }
 
